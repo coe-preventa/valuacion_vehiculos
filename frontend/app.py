@@ -256,23 +256,51 @@ Este sistema ayuda a vendedores de autos usados a determinar el precio de venta 
 ### 3. TIPO: "ajuste_calculo"
 **DEFINICIÓN DE NEGOCIO:** Reglas que se utilizan para DEFINIR EL PRECIO DE VENTA que aplicará el sitio objetivo de la aplicación, donde el vendedor aplicará una serie de PUNTOS DE DECISIÓN para poder determinar dicho precio. Es el cálculo final sobre el precio de referencia del mercado.
 **PROPÓSITO:** Convertir el precio de mercado en un precio de venta rentable para el vendedor.
-**PALABRAS CLAVE:** aumentar, disminuir, precio, valor, porcentaje, %, margen, ganancia, inflación, precio de venta, precio final
-**ESQUEMA JSON COMPLETO:**
+**PALABRAS CLAVE:** aumentar, disminuir, precio, valor, porcentaje, %, margen, ganancia, inflación, precio de venta, precio final, pesos, $, monto
+
+**IMPORTANTE - DISTINGUIR ENTRE TIPOS DE AJUSTE:**
+- Si menciona "%" o "porcentaje" → tipo: "ajuste_porcentual" con campo "porcentaje"
+- Si menciona "$", "pesos", "monto fijo", o un número sin % → tipo: "ajuste_fijo" con campo "monto"
+- Si menciona "inflación" → tipo: "inflacion"
+- Si menciona "margen" o "ganancia" → tipo: "margen_ganancia"
+
+**ESQUEMA JSON PARA ajuste_porcentual:**
 ```json
 {{
-  "tipo": "ajuste_porcentual|margen_ganancia|inflacion|ajuste_fijo|ajuste_temporal",
+  "tipo": "ajuste_porcentual",
   "porcentaje": 15,
   "operacion": "incrementar|decrementar",
-  "base": "promedio_mercado|mediana_mercado|precio_minimo|precio_maximo",
-  "condicion_marca": "Renault (si aplica)",
-  "condicion_modelo": "Corolla (si aplica)",
+  "base": "promedio_mercado|mediana_mercado",
+  "condicion_marca": "Marca (si aplica)",
+  "condicion_modelo": "Modelo (si aplica)",
   "condicion_año": 2020,
-  "periodo_vigencia": {{
-    "tipo": "mes|trimestre|rango_fechas|permanente",
-    "mes": "enero",
-    "año": 2025
-  }},
+  "periodo_vigencia": {{"tipo": "mes|trimestre|permanente", "mes": "enero", "año": 2025}},
   "motivo": "razón del ajuste"
+}}
+```
+
+**ESQUEMA JSON PARA ajuste_fijo (MONTO EN PESOS):**
+```json
+{{
+  "tipo": "ajuste_fijo",
+  "monto": 20000,
+  "moneda": "ARS|USD",
+  "operacion": "incrementar|decrementar",
+  "condicion_marca": "Marca (si aplica)",
+  "condicion_modelo": "Modelo (si aplica)",
+  "condicion_año": 2020,
+  "periodo_vigencia": {{"tipo": "mes|trimestre|permanente", "mes": "enero", "año": 2025}},
+  "motivo": "razón del ajuste"
+}}
+```
+
+**ESQUEMA JSON PARA inflacion:**
+```json
+{{
+  "tipo": "inflacion",
+  "porcentaje": 5,
+  "periodo_dias": 30,
+  "motivo": "ajuste por inflación"
 }}
 ```
 
@@ -374,6 +402,43 @@ ENTRADA: "Aumentar el precio de los autos Renault un 15% por el mes de enero"
       "tipo": "mes",
       "mes": "enero"
     }}
+  }}
+}}
+```
+
+ENTRADA: "Aumentar en 20000$ el precio de los autos Renault solo por el mes de enero de 2026"
+```json
+{{
+  "tipo_detectado": "ajuste_calculo",
+  "es_valido": true,
+  "parametros": {{
+    "tipo": "ajuste_fijo",
+    "monto": 20000,
+    "moneda": "ARS",
+    "operacion": "incrementar",
+    "condicion_marca": "Renault",
+    "periodo_vigencia": {{
+      "tipo": "mes",
+      "mes": "enero",
+      "año": 2026
+    }}
+  }}
+}}
+```
+
+ENTRADA: "Restar 50000 pesos a los Toyota Corolla 2020"
+```json
+{{
+  "tipo_detectado": "ajuste_calculo",
+  "es_valido": true,
+  "parametros": {{
+    "tipo": "ajuste_fijo",
+    "monto": 50000,
+    "moneda": "ARS",
+    "operacion": "decrementar",
+    "condicion_marca": "Toyota",
+    "condicion_modelo": "Corolla",
+    "condicion_año": 2020
   }}
 }}
 ```
@@ -933,4 +998,4 @@ elif pagina == "📜 Auditoría":
 # ============================================
 
 st.markdown("---")
-st.caption(f"Sistema de Valuación v1.8 | Usuario: {st.session_state.usuario_nombre} | {datetime.now().strftime('%H:%M')}")
+st.caption(f"Sistema de Valuación v1.9 | Usuario: {st.session_state.usuario_nombre} | {datetime.now().strftime('%H:%M')}")
