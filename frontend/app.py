@@ -223,46 +223,123 @@ Este sistema ayuda a vendedores de autos usados a determinar el precio de venta 
 
 ## TIPOS DE REGLAS - DEFINICIONES COMPLETAS DE NEGOCIO
 
+═══════════════════════════════════════════════════════════════════════════════
 ### 1. TIPO: "fuente"
+═══════════════════════════════════════════════════════════════════════════════
 **DEFINICIÓN DE NEGOCIO:** Reglas para obtener los PORTALES O SITIOS DE INTERNET de consulta sobre datos relevantes de autos publicados en internet con las características buscadas.
 **PROPÓSITO:** Definir de dónde se extraen los datos de precios del mercado.
-**PALABRAS CLAVE:** kavak, mercadolibre, sitio, portal, web, url, .com, página, fuente de datos, plataforma
+
+**ESCENARIOS CONTEMPLADOS:**
+- Agregar un nuevo portal de consulta (Kavak, MercadoLibre, Autocosmos, etc.)
+- Definir prioridad entre fuentes (cuál consultar primero)
+- Marcar fuentes como verificadas o confiables
+- Fuentes específicas por país o región (Argentina, México, Chile)
+- Fuentes especializadas por tipo de vehículo (autos de lujo, comerciales, etc.)
+- Excluir o deshabilitar una fuente temporalmente
+
+**PALABRAS CLAVE:** kavak, mercadolibre, autocosmos, demotores, olx, seminuevos, sitio, portal, web, url, .com, página, fuente, plataforma, consultar, buscar en, agregar fuente, quitar fuente, prioridad, principal, secundaria, confiable, verificado
+
 **ESQUEMA JSON:**
 ```json
 {{
-  "url": "kavak.com",
+  "url": "kavak.com.ar",
   "nombre": "Kavak Argentina",
+  "pais": "Argentina",
   "prioridad": 1,
   "verificado": true,
+  "tipo_vehiculos": "todos|autos|motos|comerciales",
+  "activo": true,
   "notas": "información adicional"
 }}
 ```
 
+**ESQUEMA JSON PARA MÚLTIPLES FUENTES:**
+```json
+{{
+  "fuentes": [
+    {{"url": "kavak.com.ar", "nombre": "Kavak", "prioridad": 1}},
+    {{"url": "mercadolibre.com.ar", "nombre": "MercadoLibre", "prioridad": 2}}
+  ]
+}}
+```
+
+═══════════════════════════════════════════════════════════════════════════════
 ### 2. TIPO: "filtro_busqueda"
+═══════════════════════════════════════════════════════════════════════════════
 **DEFINICIÓN DE NEGOCIO:** Reglas de FILTRADO que usa el vendedor para establecer los PARÁMETROS DE BÚSQUEDA de publicaciones coherentes con el auto que se quiere publicar. Establece EQUIVALENCIAS como Marca, modelo, kilometraje, tipo de transmisión, etc.
 **PROPÓSITO:** Asegurar que solo se comparen autos similares al que se va a vender.
-**PALABRAS CLAVE:** filtrar, marca, modelo, año, kilometraje, transmisión, combustible, rango, equivalencia, similar, ±
+
+**ESCENARIOS CONTEMPLADOS:**
+- Filtrar por marca exacta o lista de marcas equivalentes
+- Filtrar por modelo exacto o familia de modelos
+- Rango de años (±1, ±2 años del vehículo a valuar)
+- Rango de kilometraje (±10000 km, ±20000 km)
+- Tipo de transmisión (automática, manual, CVT, secuencial)
+- Tipo de combustible (nafta, diesel, GNC, híbrido, eléctrico)
+- Cantidad de puertas (2, 3, 4, 5)
+- Color específico o grupo de colores
+- Versión o equipamiento específico
+- Ubicación geográfica (provincia, ciudad, zona)
+- Estado del vehículo (nuevo, usado, 0km)
+- Tipo de vendedor (particular, concesionaria, agencia)
+- Filtros combinados con múltiples condiciones
+
+**PALABRAS CLAVE:** filtrar, buscar, marca, modelo, año, kilometraje, km, transmisión, automático, manual, combustible, nafta, diesel, gnc, híbrido, eléctrico, puertas, color, versión, ubicación, provincia, ciudad, rango, entre, desde, hasta, mayor, menor, igual, similar, equivalente, ±, más menos
+
+**OPERADORES DISPONIBLES:** igual, diferente, mayor, menor, mayor_igual, menor_igual, entre, contiene, en_lista
+
 **ESQUEMA JSON:**
 ```json
 {{
   "filtros": [
     {{"campo": "marca", "operador": "igual", "valor": "Toyota"}},
+    {{"campo": "marca", "operador": "en_lista", "valor": ["Toyota", "Honda", "Nissan"]}},
+    {{"campo": "modelo", "operador": "contiene", "valor": "Corolla"}},
     {{"campo": "año", "operador": "entre", "valor": [-2, 2], "relativo": true}},
-    {{"campo": "kilometraje", "operador": "entre", "valor": [-15000, 15000], "relativo": true}}
+    {{"campo": "año", "operador": "mayor_igual", "valor": 2018}},
+    {{"campo": "kilometraje", "operador": "menor", "valor": 80000}},
+    {{"campo": "kilometraje", "operador": "entre", "valor": [-15000, 15000], "relativo": true}},
+    {{"campo": "transmision", "operador": "igual", "valor": "automatica"}},
+    {{"campo": "combustible", "operador": "en_lista", "valor": ["nafta", "gnc"]}},
+    {{"campo": "ubicacion", "operador": "igual", "valor": "Buenos Aires"}},
+    {{"campo": "tipo_vendedor", "operador": "igual", "valor": "concesionaria"}}
   ]
 }}
 ```
 
+═══════════════════════════════════════════════════════════════════════════════
 ### 3. TIPO: "ajuste_calculo"
+═══════════════════════════════════════════════════════════════════════════════
 **DEFINICIÓN DE NEGOCIO:** Reglas que se utilizan para DEFINIR EL PRECIO DE VENTA que aplicará el sitio objetivo de la aplicación, donde el vendedor aplicará una serie de PUNTOS DE DECISIÓN para poder determinar dicho precio. Es el cálculo final sobre el precio de referencia del mercado.
 **PROPÓSITO:** Convertir el precio de mercado en un precio de venta rentable para el vendedor.
-**PALABRAS CLAVE:** aumentar, disminuir, precio, valor, porcentaje, %, margen, ganancia, inflación, precio de venta, precio final, pesos, $, monto
 
-**IMPORTANTE - DISTINGUIR ENTRE TIPOS DE AJUSTE:**
-- Si menciona "%" o "porcentaje" → tipo: "ajuste_porcentual" con campo "porcentaje"
-- Si menciona "$", "pesos", "monto fijo", o un número sin % → tipo: "ajuste_fijo" con campo "monto"
-- Si menciona "inflación" → tipo: "inflacion"
-- Si menciona "margen" o "ganancia" → tipo: "margen_ganancia"
+**ESCENARIOS CONTEMPLADOS:**
+- Ajuste porcentual general (aumentar/disminuir X% a todos los autos)
+- Ajuste porcentual por marca específica (Renault +15%, Toyota -5%)
+- Ajuste porcentual por modelo específico (Corolla +10%)
+- Ajuste porcentual por año (autos 2020+ tienen +5%)
+- Ajuste porcentual por rango de precio (autos > $5M tienen -3%)
+- Ajuste fijo en pesos (sumar/restar $50000)
+- Ajuste fijo en dólares (sumar/restar USD 500)
+- Ajuste por inflación mensual/anual
+- Ajuste por temporada o mes específico (enero, diciembre, verano)
+- Ajuste por trimestre (Q1, Q2, Q3, Q4)
+- Ajuste por demanda (alta demanda +X%, baja demanda -X%)
+- Ajuste por antigüedad del vehículo
+- Ajuste por kilometraje (bajo km +X%, alto km -X%)
+- Margen de ganancia fijo o porcentual
+- Comisión de venta
+- Ajuste por condición especial (único dueño, service oficial, etc.)
+- Ajuste combinado con múltiples condiciones
+
+**PALABRAS CLAVE:** aumentar, incrementar, subir, sumar, agregar, disminuir, decrementar, bajar, restar, reducir, descontar, ajustar, precio, valor, porcentaje, %, pesos, $, dólares, USD, monto, margen, ganancia, utilidad, inflación, temporada, mes, trimestre, demanda, comisión
+
+**IMPORTANTE - DISTINGUIR ENTRE TIPOS:**
+- "%" o "porcentaje" o "por ciento" → tipo: "ajuste_porcentual" con campo "porcentaje"
+- "$" o "pesos" o "monto" (número sin %) → tipo: "ajuste_fijo" con campo "monto"
+- "dólares" o "USD" o "usd" → tipo: "ajuste_fijo" con moneda: "USD"
+- "inflación" → tipo: "inflacion"
+- "margen" o "ganancia" → tipo: "margen_ganancia"
 
 **ESQUEMA JSON PARA ajuste_porcentual:**
 ```json
@@ -270,26 +347,31 @@ Este sistema ayuda a vendedores de autos usados a determinar el precio de venta 
   "tipo": "ajuste_porcentual",
   "porcentaje": 15,
   "operacion": "incrementar|decrementar",
-  "base": "promedio_mercado|mediana_mercado",
+  "base": "promedio_mercado|mediana_mercado|precio_minimo|precio_maximo",
   "condicion_marca": "Marca (si aplica)",
   "condicion_modelo": "Modelo (si aplica)",
   "condicion_año": 2020,
-  "periodo_vigencia": {{"tipo": "mes|trimestre|permanente", "mes": "enero", "año": 2025}},
+  "condicion_año_operador": "igual|mayor|menor|mayor_igual|menor_igual",
+  "condicion_km_max": 50000,
+  "condicion_km_min": 0,
+  "condicion_precio_min": 1000000,
+  "condicion_precio_max": 5000000,
+  "periodo_vigencia": {{"tipo": "mes|trimestre|semestre|año|permanente|rango_fechas", "mes": "enero", "año": 2026, "fecha_inicio": "2026-01-01", "fecha_fin": "2026-01-31"}},
   "motivo": "razón del ajuste"
 }}
 ```
 
-**ESQUEMA JSON PARA ajuste_fijo (MONTO EN PESOS):**
+**ESQUEMA JSON PARA ajuste_fijo:**
 ```json
 {{
   "tipo": "ajuste_fijo",
-  "monto": 20000,
+  "monto": 50000,
   "moneda": "ARS|USD",
   "operacion": "incrementar|decrementar",
   "condicion_marca": "Marca (si aplica)",
   "condicion_modelo": "Modelo (si aplica)",
   "condicion_año": 2020,
-  "periodo_vigencia": {{"tipo": "mes|trimestre|permanente", "mes": "enero", "año": 2025}},
+  "periodo_vigencia": {{"tipo": "mes|trimestre|permanente", "mes": "enero", "año": 2026}},
   "motivo": "razón del ajuste"
 }}
 ```
@@ -300,92 +382,216 @@ Este sistema ayuda a vendedores de autos usados a determinar el precio de venta 
   "tipo": "inflacion",
   "porcentaje": 5,
   "periodo_dias": 30,
-  "motivo": "ajuste por inflación"
+  "aplicar_automatico": true,
+  "fuente_indice": "INDEC|privado",
+  "motivo": "ajuste por inflación mensual"
 }}
 ```
 
+**ESQUEMA JSON PARA margen_ganancia:**
+```json
+{{
+  "tipo": "margen_ganancia",
+  "porcentaje": 12,
+  "minimo_pesos": 100000,
+  "maximo_pesos": 500000,
+  "motivo": "margen de ganancia estándar"
+}}
+```
+
+═══════════════════════════════════════════════════════════════════════════════
 ### 4. TIPO: "depuracion"
+═══════════════════════════════════════════════════════════════════════════════
 **DEFINICIÓN DE NEGOCIO:** Reglas que utiliza el vendedor para DESECHAR O ELIMINAR PUBLICACIONES de los sitios de búsqueda que pueden provocar RUIDO O DESVÍO en el cálculo del precio de referencia del mercado.
 **PROPÓSITO:** Limpiar datos atípicos que distorsionarían el cálculo del precio justo.
-**PALABRAS CLAVE:** eliminar, descartar, quitar, ruido, outlier, más caro, más barato, sospechoso, no verificado, duplicado
+
+**ESCENARIOS CONTEMPLADOS:**
+- Eliminar N publicaciones más caras (outliers superiores)
+- Eliminar N publicaciones más baratas (outliers inferiores)
+- Eliminar extremos de ambos lados
+- Eliminar por porcentaje (el 10% más caro y más barato)
+- Eliminar publicaciones sin fotos
+- Eliminar publicaciones sin descripción completa
+- Eliminar publicaciones de vendedores no verificados
+- Eliminar publicaciones muy antiguas (más de X días)
+- Eliminar publicaciones duplicadas
+- Eliminar publicaciones con precios sospechosos (muy por debajo/encima del promedio)
+- Eliminar por desviación estándar (más de 2 desviaciones del promedio)
+- Eliminar publicaciones de cierta ubicación
+- Eliminar publicaciones sin precio visible
+- Eliminar publicaciones de vendedores con mala reputación
+
+**PALABRAS CLAVE:** eliminar, borrar, quitar, descartar, excluir, remover, desechar, depurar, limpiar, filtrar fuera, sacar, ruido, outlier, atípico, extremo, más caro, más barato, sospechoso, no verificado, sin verificar, duplicado, repetido, sin fotos, sin descripción, incompleto, antiguo, viejo, desactualizado
+
 **ESQUEMA JSON:**
 ```json
 {{
-  "accion": "eliminar_outliers|eliminar_no_verificados|eliminar_duplicados|eliminar_antiguos",
+  "accion": "eliminar_outliers|eliminar_extremos_porcentaje|eliminar_sin_fotos|eliminar_sin_descripcion|eliminar_no_verificados|eliminar_duplicados|eliminar_antiguos|eliminar_por_desviacion|eliminar_por_criterio",
   "cantidad": 5,
+  "porcentaje": 10,
   "extremo": "inferior|superior|ambos",
   "dias_maximos": 60,
+  "desviaciones_estandar": 2,
+  "criterio_campo": "campo a evaluar",
+  "criterio_condicion": "igual|mayor|menor",
+  "criterio_valor": "valor a comparar",
   "motivo": "razón de la depuración"
 }}
 ```
 
+═══════════════════════════════════════════════════════════════════════════════
 ### 5. TIPO: "muestreo"
+═══════════════════════════════════════════════════════════════════════════════
 **DEFINICIÓN DE NEGOCIO:** Reglas que establece el vendedor para DETERMINAR LA MUESTRA de publicaciones de los sitios de consulta de precios en internet.
 **PROPÓSITO:** Seleccionar un subconjunto representativo de publicaciones para el cálculo.
-**PALABRAS CLAVE:** muestra, tomar, seleccionar, aleatorio, cantidad, primeros, top, tamaño de muestra
+
+**ESCENARIOS CONTEMPLADOS:**
+- Tomar todas las publicaciones disponibles
+- Tomar N publicaciones aleatorias
+- Tomar las N más recientes (por fecha de publicación)
+- Tomar las N más baratas (precio ascendente)
+- Tomar las N más caras (precio descendente)
+- Tomar las N más relevantes (según criterio de la fuente)
+- Tomar las N con más fotos o mejor descripción
+- Tomar las N de vendedores verificados
+- Tomar un porcentaje del total
+- Tomar estratificado por fuente (X de cada portal)
+- Limitar máximo de publicaciones por fuente
+- Muestreo ponderado por antigüedad de publicación
+
+**PALABRAS CLAVE:** muestra, muestreo, tomar, seleccionar, elegir, escoger, cantidad, número, primeros, últimos, aleatorio, random, al azar, más recientes, más baratos, más caros, top, mejores, todos, porcentaje, máximo, límite
+
 **ESQUEMA JSON:**
 ```json
 {{
-  "metodo": "aleatorio|primeros_por_precio_asc|primeros_por_precio_desc|todos",
+  "metodo": "todos|aleatorio|primeros_por_precio_asc|primeros_por_precio_desc|primeros_por_fecha|primeros_por_relevancia|estratificado",
   "cantidad": 20,
-  "criterio_orden": "precio|fecha|relevancia"
+  "porcentaje": 50,
+  "maximo_por_fuente": 10,
+  "criterio_orden": "precio|fecha|relevancia|verificacion",
+  "priorizar_verificados": true,
+  "solo_con_fotos": true
 }}
 ```
 
+═══════════════════════════════════════════════════════════════════════════════
 ### 6. TIPO: "punto_control"
+═══════════════════════════════════════════════════════════════════════════════
 **DEFINICIÓN DE NEGOCIO:** Reglas que establece el vendedor para determinar CONDICIONES que permitan establecer FLUJOS CONDICIONALES dentro del proceso de cálculo de precio de venta. Por ejemplo: si no se hallan más de 5 publicaciones de autos similares, aumentar el rango de búsqueda de kilometraje.
-**PROPÓSITO:** Manejar casos excepcionales donde no hay suficientes datos.
-**PALABRAS CLAVE:** si, cuando, condición, umbral, menos de, más de, ampliar, expandir, si no se encuentran
+**PROPÓSITO:** Manejar casos excepcionales donde no hay suficientes datos o condiciones especiales.
+
+**ESCENARIOS CONTEMPLADOS:**
+- Si hay menos de N publicaciones, ampliar rango de años
+- Si hay menos de N publicaciones, ampliar rango de kilometraje
+- Si hay menos de N publicaciones, agregar marcas similares
+- Si hay menos de N publicaciones, buscar en más fuentes
+- Si hay menos de N publicaciones, alertar al usuario
+- Si hay menos de N publicaciones, abortar valuación
+- Si el precio promedio supera X, aplicar ajuste especial
+- Si la desviación es muy alta, eliminar más outliers
+- Si no hay publicaciones de concesionarias, incluir particulares
+- Si el modelo es muy nuevo, usar solo fuentes verificadas
+- Si el modelo es muy viejo, ampliar búsqueda
+- Validación cruzada entre fuentes
+- Condiciones específicas por marca/modelo
+
+**PALABRAS CLAVE:** si, cuando, en caso de, siempre que, a menos que, condición, umbral, mínimo, máximo, menos de, más de, al menos, como máximo, no se encuentran, no hay suficientes, entonces, ampliar, expandir, extender, reducir, flexibilizar, alertar, abortar, cancelar, usar alternativa, plan b, fallback
+
 **ESQUEMA JSON:**
 ```json
 {{
+  "condicion_tipo": "cantidad_minima|cantidad_maxima|precio_promedio|desviacion_alta|sin_resultados",
   "umbral_minimo": 5,
-  "condicion": "si hay menos de N publicaciones",
-  "condicion_marca": "Chevrolet (si aplica)",
-  "condicion_modelo": "Cruze (si aplica)",
-  "accion": "ampliar_busqueda|usar_fuentes_secundarias|alertar|abortar",
+  "umbral_maximo": 100,
+  "condicion_marca": "Marca específica (si aplica)",
+  "condicion_modelo": "Modelo específico (si aplica)",
+  "condicion_año": 2020,
+  "accion": "ampliar_busqueda|reducir_busqueda|usar_fuentes_secundarias|agregar_marcas_similares|alertar|abortar|aplicar_ajuste_especial",
   "nuevos_parametros": {{
     "año_rango": [-3, 3],
-    "km_rango": [-20000, 20000]
-  }}
+    "km_rango": [-30000, 30000],
+    "marcas_adicionales": ["Honda", "Nissan"],
+    "incluir_particulares": true
+  }},
+  "mensaje_alerta": "Mensaje personalizado para el usuario",
+  "ajuste_especial": {{"tipo": "porcentual", "valor": -5}}
 }}
 ```
 
+═══════════════════════════════════════════════════════════════════════════════
 ### 7. TIPO: "metodo_valuacion"
+═══════════════════════════════════════════════════════════════════════════════
 **DEFINICIÓN DE NEGOCIO:** Reglas que DEFINEN EL PRECIO DE VENTA DE REFERENCIA DEL MERCADO. Es el MÉTODO DE VALUACIÓN con respecto a la muestra obtenida de publicaciones. Define cómo se calcula el valor central a partir de los datos.
 **PROPÓSITO:** Calcular un precio de referencia justo basado en la muestra de mercado.
-**PALABRAS CLAVE:** mediana, promedio, media, percentil, precio de referencia, valor de mercado, valuación, método de cálculo
+
+**ESCENARIOS CONTEMPLADOS:**
+- Usar mediana (valor central, resistente a outliers)
+- Usar promedio simple (media aritmética)
+- Usar promedio ponderado (dar más peso a ciertas publicaciones)
+- Usar moda (valor más frecuente)
+- Usar percentil específico (P25, P50, P75, P90)
+- Usar precio mínimo o máximo de la muestra
+- Combinar métodos (70% mediana + 30% promedio)
+- Excluir extremos antes de calcular
+- Ponderar por antigüedad de publicación (más recientes pesan más)
+- Ponderar por verificación del vendedor
+- Ponderar por similitud con el vehículo a valuar
+- Ponderar por cantidad de fotos/descripción
+- Usar rango de precios (mínimo-máximo sugerido)
+
+**PALABRAS CLAVE:** mediana, promedio, media, moda, percentil, valor central, método, calcular, computar, precio de referencia, valor de mercado, valuación, tasación, ponderado, peso, combinar, excluir extremos
+
 **ESQUEMA JSON:**
 ```json
 {{
-  "metodo": "mediana|promedio|promedio_ponderado|percentil|moda",
+  "metodo": "mediana|promedio|promedio_ponderado|moda|percentil|minimo|maximo|combinado",
   "percentil": 50,
   "excluir_extremos": true,
+  "cantidad_excluir": 2,
+  "combinacion": [
+    {{"metodo": "mediana", "peso": 0.7}},
+    {{"metodo": "promedio", "peso": 0.3}}
+  ],
   "ponderaciones": {{
-    "antiguedad_publicacion": 1.0,
-    "verificacion_vendedor": 1.5,
-    "similitud_km": 1.0
-  }}
+    "antiguedad_publicacion": {{"peso": 1.5, "dias_max": 30}},
+    "verificacion_vendedor": {{"peso": 2.0, "solo_verificados": false}},
+    "similitud_km": {{"peso": 1.2, "tolerancia": 10000}},
+    "cantidad_fotos": {{"peso": 1.1, "minimo": 5}},
+    "tipo_vendedor": {{"concesionaria": 1.3, "particular": 1.0}}
+  }},
+  "calcular_rango": true,
+  "rango_porcentaje": 10
 }}
 ```
 
+═══════════════════════════════════════════════════════════════════════════════
 ## REGLAS DE EXTRACCIÓN - MUY IMPORTANTE
+═══════════════════════════════════════════════════════════════════════════════
 
 ⚠️ DEBES CAPTURAR **ABSOLUTAMENTE TODOS** LOS DETALLES DE LA DESCRIPCIÓN:
-- Marcas de autos mencionadas (Toyota, Renault, Chevrolet, etc.)
-- Modelos específicos (Corolla, Clio, Cruze, etc.)
+- Marcas de autos mencionadas (Toyota, Renault, Chevrolet, Ford, Volkswagen, Fiat, Honda, etc.)
+- Modelos específicos (Corolla, Clio, Cruze, Focus, Gol, Cronos, Civic, etc.)
+- Versiones o variantes (SE, XLE, Titanium, Highline, etc.)
 - Porcentajes o valores numéricos exactos
-- Fechas, meses, períodos temporales (enero, febrero, Q1, trimestre, etc.)
-- Años específicos
-- Rangos de kilometraje
-- Condiciones específicas mencionadas
-- Motivos o razones explicadas
-- Cualquier otro detalle relevante
+- Montos en pesos ($) o dólares (USD)
+- Fechas, meses, períodos temporales (enero, febrero, Q1, trimestre, primer semestre, etc.)
+- Años específicos (2020, 2021, 2022, etc.)
+- Rangos de kilometraje (±10000 km, menos de 50000 km, etc.)
+- Rangos de años (±2 años, 2018 en adelante, etc.)
+- Condiciones específicas mencionadas (único dueño, service oficial, etc.)
+- Motivos o razones explicadas (por alta demanda, por baja rotación, etc.)
+- Ubicaciones geográficas (Buenos Aires, Córdoba, CABA, etc.)
+- Tipos de vendedor (concesionaria, particular, agencia)
+- Cualquier otro detalle relevante mencionado
 
 NUNCA omitas información. Si el usuario menciona "enero", debe aparecer en el JSON.
 Si menciona "Renault", debe aparecer. Si menciona "15%", debe aparecer exactamente.
+Si menciona "$50000", debe ser ajuste_fijo con monto 50000.
+Si menciona "50000 pesos", debe ser ajuste_fijo con monto 50000.
 
+═══════════════════════════════════════════════════════════════════════════════
 ## EJEMPLOS DE EXTRACCIÓN EXHAUSTIVA
+═══════════════════════════════════════════════════════════════════════════════
 
 ENTRADA: "Aumentar el precio de los autos Renault un 15% por el mes de enero"
 ```json
@@ -426,127 +632,160 @@ ENTRADA: "Aumentar en 20000$ el precio de los autos Renault solo por el mes de e
 }}
 ```
 
-ENTRADA: "Restar 50000 pesos a los Toyota Corolla 2020"
+ENTRADA: "Restar 500 dólares a los Toyota Corolla 2020 importados"
 ```json
 {{
   "tipo_detectado": "ajuste_calculo",
   "es_valido": true,
   "parametros": {{
     "tipo": "ajuste_fijo",
-    "monto": 50000,
-    "moneda": "ARS",
+    "monto": 500,
+    "moneda": "USD",
     "operacion": "decrementar",
     "condicion_marca": "Toyota",
     "condicion_modelo": "Corolla",
-    "condicion_año": 2020
+    "condicion_año": 2020,
+    "motivo": "importados"
   }}
 }}
 ```
 
-ENTRADA: "Reducir 10% el valor de los Toyota Corolla 2020 durante el primer trimestre por baja demanda"
+ENTRADA: "Aplicar margen de ganancia del 12% con mínimo de 100000 pesos"
 ```json
 {{
   "tipo_detectado": "ajuste_calculo",
   "es_valido": true,
   "parametros": {{
-    "tipo": "ajuste_porcentual",
-    "porcentaje": 10,
-    "operacion": "decrementar",
-    "base": "promedio_mercado",
-    "condicion_marca": "Toyota",
-    "condicion_modelo": "Corolla",
-    "condicion_año": 2020,
-    "periodo_vigencia": {{
-      "tipo": "trimestre",
-      "valor": "Q1"
-    }},
-    "motivo": "baja demanda"
+    "tipo": "margen_ganancia",
+    "porcentaje": 12,
+    "minimo_pesos": 100000
   }}
 }}
 ```
 
-ENTRADA: "Consultar precios en Kavak y MercadoLibre como fuentes principales"
+ENTRADA: "Consultar precios en Kavak, MercadoLibre y Autocosmos priorizando Kavak"
 ```json
 {{
   "tipo_detectado": "fuente",
   "es_valido": true,
   "parametros": {{
     "fuentes": [
-      {{"url": "kavak.com", "nombre": "Kavak", "prioridad": 1}},
-      {{"url": "mercadolibre.com.ar", "nombre": "MercadoLibre", "prioridad": 1}}
-    ],
-    "notas": "fuentes principales"
+      {{"url": "kavak.com.ar", "nombre": "Kavak", "prioridad": 1}},
+      {{"url": "mercadolibre.com.ar", "nombre": "MercadoLibre", "prioridad": 2}},
+      {{"url": "autocosmos.com.ar", "nombre": "Autocosmos", "prioridad": 3}}
+    ]
   }}
 }}
 ```
 
-ENTRADA: "Eliminar las 5 publicaciones más baratas porque distorsionan el promedio"
+ENTRADA: "Eliminar las 5 publicaciones más baratas y las 3 más caras porque distorsionan"
 ```json
 {{
   "tipo_detectado": "depuracion",
   "es_valido": true,
   "parametros": {{
     "accion": "eliminar_outliers",
-    "cantidad": 5,
-    "extremo": "inferior",
-    "motivo": "distorsionan el promedio"
+    "extremo": "ambos",
+    "cantidad_inferior": 5,
+    "cantidad_superior": 3,
+    "motivo": "distorsionan"
   }}
 }}
 ```
 
-ENTRADA: "Filtrar solo autos con menos de 50000 km, año 2020 en adelante, transmisión automática"
+ENTRADA: "Eliminar publicaciones con más de 45 días de antigüedad y sin fotos"
+```json
+{{
+  "tipo_detectado": "depuracion",
+  "es_valido": true,
+  "parametros": {{
+    "accion": "eliminar_por_criterio",
+    "criterios": [
+      {{"tipo": "eliminar_antiguos", "dias_maximos": 45}},
+      {{"tipo": "eliminar_sin_fotos"}}
+    ]
+  }}
+}}
+```
+
+ENTRADA: "Filtrar Toyota y Honda, modelos 2019 a 2023, menos de 80000 km, solo automáticos de concesionarias"
 ```json
 {{
   "tipo_detectado": "filtro_busqueda",
   "es_valido": true,
   "parametros": {{
     "filtros": [
-      {{"campo": "kilometraje", "operador": "menor", "valor": 50000}},
-      {{"campo": "año", "operador": "mayor_igual", "valor": 2020}},
-      {{"campo": "transmision", "operador": "igual", "valor": "automatica"}}
+      {{"campo": "marca", "operador": "en_lista", "valor": ["Toyota", "Honda"]}},
+      {{"campo": "año", "operador": "entre", "valor": [2019, 2023]}},
+      {{"campo": "kilometraje", "operador": "menor", "valor": 80000}},
+      {{"campo": "transmision", "operador": "igual", "valor": "automatica"}},
+      {{"campo": "tipo_vendedor", "operador": "igual", "valor": "concesionaria"}}
     ]
   }}
 }}
 ```
 
-ENTRADA: "Tomar una muestra de 30 publicaciones ordenadas por precio de menor a mayor"
+ENTRADA: "Tomar máximo 30 publicaciones, priorizando las más recientes de vendedores verificados"
 ```json
 {{
   "tipo_detectado": "muestreo",
   "es_valido": true,
   "parametros": {{
-    "metodo": "primeros_por_precio_asc",
-    "cantidad": 30
+    "metodo": "primeros_por_fecha",
+    "cantidad": 30,
+    "priorizar_verificados": true
   }}
 }}
 ```
 
-ENTRADA: "Si no hay al menos 10 publicaciones de Chevrolet Cruze, ampliar la búsqueda a ±3 años y ±20000 km"
+ENTRADA: "Si hay menos de 8 publicaciones de Ford Focus, ampliar a ±4 años y ±25000 km y agregar Ford Fiesta"
 ```json
 {{
   "tipo_detectado": "punto_control",
   "es_valido": true,
   "parametros": {{
-    "umbral_minimo": 10,
-    "condicion_marca": "Chevrolet",
-    "condicion_modelo": "Cruze",
+    "condicion_tipo": "cantidad_minima",
+    "umbral_minimo": 8,
+    "condicion_marca": "Ford",
+    "condicion_modelo": "Focus",
     "accion": "ampliar_busqueda",
     "nuevos_parametros": {{
-      "año_rango": [-3, 3],
-      "km_rango": [-20000, 20000]
+      "año_rango": [-4, 4],
+      "km_rango": [-25000, 25000],
+      "modelos_adicionales": ["Fiesta"]
     }}
   }}
 }}
 ```
 
-ENTRADA: "Usar la mediana como precio de referencia del mercado, excluyendo los valores extremos"
+ENTRADA: "Usar 70% mediana y 30% promedio, excluyendo los 2 valores más extremos de cada lado"
 ```json
 {{
   "tipo_detectado": "metodo_valuacion",
   "es_valido": true,
   "parametros": {{
-    "metodo": "mediana",
-    "excluir_extremos": true
+    "metodo": "combinado",
+    "combinacion": [
+      {{"metodo": "mediana", "peso": 0.7}},
+      {{"metodo": "promedio", "peso": 0.3}}
+    ],
+    "excluir_extremos": true,
+    "cantidad_excluir": 2
+  }}
+}}
+```
+
+ENTRADA: "Usar percentil 75 para autos de alta gama y percentil 50 para el resto"
+```json
+{{
+  "tipo_detectado": "metodo_valuacion",
+  "es_valido": true,
+  "parametros": {{
+    "metodo": "percentil",
+    "percentil": 75,
+    "condicion": "alta_gama",
+    "percentil_alternativo": 50,
+    "motivo": "diferenciar alta gama del resto"
   }}
 }}
 ```
@@ -558,7 +797,9 @@ SOLICITUD ACTUAL:
 RECUERDA: 
 1. Identifica correctamente el TIPO de regla según las definiciones de negocio
 2. Extrae ABSOLUTAMENTE TODOS los detalles mencionados
-3. No omitas fechas, marcas, modelos, porcentajes, condiciones ni ningún otro elemento
+3. No omitas fechas, marcas, modelos, porcentajes, montos, condiciones ni ningún otro elemento
+4. Distingue correctamente entre ajuste_porcentual (%) y ajuste_fijo ($, pesos, monto)
+5. Captura rangos, listas y condiciones múltiples cuando se mencionen
 
 Responde SOLO con el JSON (sin explicaciones):"""
 
@@ -773,13 +1014,14 @@ if pagina == "🔧 Nueva Regla":
     st.title("🔧 Nueva Regla Inteligente")
     st.caption("Describe la regla en detalle. El sistema capturará TODOS los elementos mencionados.")
 
-    # 1. INPUTS PRIMARIOS
-    col1, col2 = st.columns(2)
+    # 1. INPUTS PRIMARIOS (sin Orden - se define después de generar JSON)
+    col1, col2 = st.columns([3, 1])
     with col1:
         codigo = st.text_input("Código *", placeholder="Ej: AJUSTE_RENAULT_ENERO")
-        nombre = st.text_input("Nombre *", placeholder="Ej: Aumento Renault Enero")
     with col2:
-        orden = st.number_input("Orden", value=10)
+        pass  # Espacio reservado
+    
+    nombre = st.text_input("Nombre *", placeholder="Ej: Aumento Renault Enero")
 
     # 2. DESCRIPCIÓN Y BOTÓN GENERAR
     descripcion = st.text_area(
@@ -909,7 +1151,149 @@ if pagina == "🔧 Nueva Regla":
         except:
             st.caption("❌ JSON inválido")
 
-    # 5. GUARDAR
+    # 5. SELECTOR DE ORDEN VISUAL (solo si hay JSON generado)
+    orden = 10  # valor por defecto
+    
+    if st.session_state.json_generado:
+        st.markdown("---")
+        st.subheader(f"📊 Ordenamiento de Reglas: {TIPO_REGLA_LABELS.get(tipo, tipo)}")
+        
+        # Obtener reglas existentes del mismo tipo
+        todas_reglas = api_get("/reglas") or []
+        reglas_mismo_tipo = [r for r in todas_reglas if r.get('tipo') == tipo]
+        reglas_mismo_tipo = sorted(reglas_mismo_tipo, key=lambda x: x.get('orden', 0))
+        
+        if reglas_mismo_tipo:
+            st.markdown("**Reglas existentes en esta categoría:**")
+            
+            # Crear opciones de posición
+            posiciones = []
+            posiciones.append({"orden": 0, "label": "🔝 Al inicio (antes de todas)", "pos": "inicio"})
+            
+            for i, regla in enumerate(reglas_mismo_tipo):
+                orden_actual = regla.get('orden', 0)
+                posiciones.append({
+                    "orden": orden_actual,
+                    "label": f"📍 Orden {orden_actual}: {regla.get('nombre', 'Sin nombre')}",
+                    "pos": "existente",
+                    "regla": regla
+                })
+                # Opción para insertar después de esta regla
+                orden_siguiente = orden_actual + 1
+                if i < len(reglas_mismo_tipo) - 1:
+                    orden_siguiente = (orden_actual + reglas_mismo_tipo[i+1].get('orden', orden_actual + 2)) // 2
+                posiciones.append({
+                    "orden": orden_siguiente,
+                    "label": f"   ↳ Insertar aquí (orden {orden_siguiente})",
+                    "pos": "insertar",
+                    "orden_sugerido": orden_siguiente
+                })
+            
+            # Mostrar tabla visual
+            st.markdown("---")
+            col_tabla, col_nueva = st.columns([2, 1])
+            
+            with col_tabla:
+                # Tabla de reglas existentes
+                tabla_data = []
+                for regla in reglas_mismo_tipo:
+                    tabla_data.append({
+                        "Orden": regla.get('orden', 0),
+                        "Código": regla.get('codigo', ''),
+                        "Nombre": regla.get('nombre', ''),
+                        "Activo": "✅" if regla.get('activo', True) else "❌"
+                    })
+                
+                if tabla_data:
+                    df_reglas = pd.DataFrame(tabla_data)
+                    st.dataframe(df_reglas, use_container_width=True, hide_index=True)
+            
+            with col_nueva:
+                st.markdown("**🆕 Nueva regla:**")
+                st.markdown(f"**{nombre or 'Sin nombre'}**")
+                st.caption(f"Código: {codigo or 'Sin código'}")
+                
+                # Calcular opciones de orden
+                ordenes_existentes = [r.get('orden', 0) for r in reglas_mismo_tipo]
+                orden_min = min(ordenes_existentes) if ordenes_existentes else 0
+                orden_max = max(ordenes_existentes) if ordenes_existentes else 0
+                
+                opciones_orden = [
+                    (orden_min - 10 if orden_min > 10 else 1, f"🔝 Al inicio (orden {orden_min - 10 if orden_min > 10 else 1})"),
+                ]
+                
+                for i, regla in enumerate(reglas_mismo_tipo):
+                    ord_actual = regla.get('orden', 0)
+                    if i < len(reglas_mismo_tipo) - 1:
+                        ord_siguiente = reglas_mismo_tipo[i+1].get('orden', ord_actual + 10)
+                        orden_medio = (ord_actual + ord_siguiente) // 2
+                        if orden_medio != ord_actual:
+                            opciones_orden.append((orden_medio, f"↳ Después de '{regla.get('nombre', '')}' (orden {orden_medio})"))
+                    else:
+                        opciones_orden.append((ord_actual + 10, f"↳ Después de '{regla.get('nombre', '')}' (orden {ord_actual + 10})"))
+                
+                # Selector de posición
+                opcion_seleccionada = st.radio(
+                    "Posición de la nueva regla:",
+                    options=range(len(opciones_orden)),
+                    format_func=lambda i: opciones_orden[i][1],
+                    key="selector_orden"
+                )
+                
+                orden = opciones_orden[opcion_seleccionada][0]
+                
+                st.success(f"**Orden seleccionado: {orden}**")
+        
+        else:
+            st.info("No hay reglas existentes de este tipo. Esta será la primera.")
+            orden = st.number_input("Orden", value=10, min_value=1, key="orden_primera_regla")
+        
+        # Previsualización del nuevo ordenamiento
+        if reglas_mismo_tipo:
+            st.markdown("---")
+            st.markdown("**📋 Previsualización del nuevo ordenamiento:**")
+            
+            # Crear lista con la nueva regla incluida
+            preview_data = []
+            nueva_insertada = False
+            
+            for regla in reglas_mismo_tipo:
+                ord_regla = regla.get('orden', 0)
+                
+                # Insertar nueva regla en su posición
+                if not nueva_insertada and orden <= ord_regla:
+                    preview_data.append({
+                        "Orden": orden,
+                        "Código": codigo.upper().replace(" ", "_") if codigo else "NUEVO",
+                        "Nombre": f"🆕 {nombre or 'Nueva Regla'}",
+                        "Estado": "🆕 NUEVA"
+                    })
+                    nueva_insertada = True
+                
+                preview_data.append({
+                    "Orden": ord_regla,
+                    "Código": regla.get('codigo', ''),
+                    "Nombre": regla.get('nombre', ''),
+                    "Estado": "✅ Existente"
+                })
+            
+            # Si no se insertó, va al final
+            if not nueva_insertada:
+                preview_data.append({
+                    "Orden": orden,
+                    "Código": codigo.upper().replace(" ", "_") if codigo else "NUEVO",
+                    "Nombre": f"🆕 {nombre or 'Nueva Regla'}",
+                    "Estado": "🆕 NUEVA"
+                })
+            
+            df_preview = pd.DataFrame(preview_data)
+            st.dataframe(df_preview, use_container_width=True, hide_index=True)
+    
+    else:
+        # Si no hay JSON generado, mostrar input simple de orden
+        orden = 10
+
+    # 6. GUARDAR
     puede_guardar = json_editado and json_editado != "{}"
     
     if st.button("💾 Guardar Regla", type="primary", use_container_width=True, disabled=not puede_guardar):
@@ -998,4 +1382,4 @@ elif pagina == "📜 Auditoría":
 # ============================================
 
 st.markdown("---")
-st.caption(f"Sistema de Valuación v1.9 | Usuario: {st.session_state.usuario_nombre} | {datetime.now().strftime('%H:%M')}")
+st.caption(f"Sistema de Valuación v2.1 | Usuario: {st.session_state.usuario_nombre} | {datetime.now().strftime('%H:%M')}")
