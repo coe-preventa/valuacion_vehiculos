@@ -904,25 +904,26 @@ def api_put(ep, d, p=None):
     except Exception as e: st.error(f"Error: {e}"); return None
 
 
+# Orden según README: 1.Fuente, 2.Filtro, 3.Ajuste, 4.Depuración, 5.Muestreo, 6.Control, 7.Método
 TIPO_REGLA_LABELS = {
     "fuente": "📍 Fuente de Datos",
     "filtro_busqueda": "🔍 Filtro de Búsqueda",
+    "ajuste_calculo": "💰 Ajuste de Cálculo",
     "depuracion": "🧹 Depuración",
     "muestreo": "📊 Muestreo",
     "punto_control": "⚠️ Punto de Control",
-    "metodo_valuacion": "📈 Método de Valuación",
-    "ajuste_calculo": "💰 Ajuste de Cálculo"
+    "metodo_valuacion": "📈 Método de Valuación"
 }
 
 # Descripciones completas para mostrar al usuario
 TIPO_REGLA_DESCRIPCIONES = {
     "fuente": "Portales o sitios de internet de consulta sobre datos de autos publicados (Kavak, MercadoLibre, etc.)",
     "filtro_busqueda": "Parámetros de búsqueda coherentes con el auto a publicar: marca, modelo, km, transmisión, etc.",
+    "ajuste_calculo": "Definir el precio de venta final aplicando puntos de decisión del vendedor (+%, -$, inflación, margen)",
     "depuracion": "Eliminar publicaciones que generan ruido o desvío en el cálculo del precio de referencia",
     "muestreo": "Determinar la muestra de publicaciones de los sitios de consulta",
     "punto_control": "Condiciones para flujos condicionales (ej: si hay menos de 5 publicaciones, ampliar búsqueda)",
-    "metodo_valuacion": "Método para calcular el precio de referencia del mercado (mediana, promedio, etc.)",
-    "ajuste_calculo": "Definir el precio de venta final aplicando puntos de decisión del vendedor"
+    "metodo_valuacion": "Método para calcular el precio de referencia del mercado (mediana, promedio, etc.)"
 }
 
 CLAVES_TIPOS = list(TIPO_REGLA_LABELS.keys())
@@ -957,8 +958,8 @@ with st.sidebar:
             "gemini-2.0-flash-exp",
             "gemini-1.5-flash",
             "gemini-1.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
+            "gemini-exp-1206",
+            "gemini-2.0-flash-thinking-exp",
             "Otro (Escribir manual)"
         ]
         
@@ -993,7 +994,7 @@ with st.sidebar:
             st.session_state.usuario_id = None
             st.rerun()
         st.markdown("---")
-        pagina = st.radio("Menú", ["📋 Reglas Activas", "🔧 Nueva Regla", "📜 Auditoría"], label_visibility="collapsed")
+        pagina = st.radio("Menú", ["🚗 Valuar Vehículo", "📋 Reglas Activas", "🔧 Nueva Regla", "📜 Auditoría", "📊 Historial Valuaciones"], label_visibility="collapsed")
 
 
 # ============================================
@@ -1340,23 +1341,32 @@ elif pagina == "📋 Reglas Activas":
                 reglas_por_tipo[tipo] = []
             reglas_por_tipo[tipo].append(r)
         
-        for tipo, lista in reglas_por_tipo.items():
-            st.subheader(TIPO_REGLA_LABELS.get(tipo, tipo))
-            st.caption(TIPO_REGLA_DESCRIPCIONES.get(tipo, ''))
-            
-            for r in lista:
-                with st.expander(f"{'✅' if r.get('activo', True) else '❌'} {r['nombre']} - `{r.get('codigo', '')}`"):
-                    col1, col2 = st.columns([3, 1])
-                    
-                    with col1:
-                        if r.get('descripcion'):
-                            st.caption(f"📝 {r['descripcion']}")
-                        st.json(r['parametros'])
-                    
-                    with col2:
-                        if st.button("🗑️ Desactivar", key=f"del_{r['id']}"):
-                            api_put(f"/reglas/{r['id']}", {"activo": False}, {"usuario_id": st.session_state.usuario_id})
-                            st.rerun()
+        # Ordenar por el orden definido en CLAVES_TIPOS (según README)
+        for tipo in CLAVES_TIPOS:
+            if tipo in reglas_por_tipo:
+                lista = reglas_por_tipo[tipo]
+                # Ordenar reglas dentro del tipo por campo 'orden'
+                lista = sorted(lista, key=lambda x: x.get('orden', 0))
+                
+                st.subheader(TIPO_REGLA_LABELS.get(tipo, tipo))
+                st.caption(TIPO_REGLA_DESCRIPCIONES.get(tipo, ''))
+                
+                for r in lista:
+                    orden_num = r.get('orden', 0)
+                    with st.expander(f"{'✅' if r.get('activo', True) else '❌'} [{orden_num}] {r['nombre']} - `{r.get('codigo', '')}`"):
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            if r.get('descripcion'):
+                                st.caption(f"📝 {r['descripcion']}")
+                            st.json(r['parametros'])
+                        
+                        with col2:
+                            st.caption(f"Orden: {orden_num}")
+                            st.caption(f"Versión: {r.get('version', 1)}")
+                            if st.button("🗑️ Desactivar", key=f"del_{r['id']}"):
+                                api_put(f"/reglas/{r['id']}", {"activo": False}, {"usuario_id": st.session_state.usuario_id})
+                                st.rerun()
 
 
 # ============================================
@@ -1378,8 +1388,284 @@ elif pagina == "📜 Auditoría":
 
 
 # ============================================
+# VALUAR VEHÍCULO
+# ============================================
+
+elif pagina == "🚗 Valuar Vehículo":
+    st.title("🚗 Valuar Vehículo")
+    st.caption("Ingrese los datos del vehículo para obtener una valuación basada en las reglas configuradas.")
+    
+    # Inicializar estado de valuación
+    if "valuacion_resultado" not in st.session_state:
+        st.session_state.valuacion_resultado = None
+    if "valuacion_en_proceso" not in st.session_state:
+        st.session_state.valuacion_en_proceso = False
+    
+    # Formulario de vehículo
+    st.subheader("📝 Datos del Vehículo")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        marca = st.text_input("Marca *", placeholder="Ej: Toyota, Renault, Chevrolet")
+        año = st.number_input("Año *", min_value=1990, max_value=2026, value=2020)
+        version = st.text_input("Versión", placeholder="Ej: SE, XLE, Titanium (opcional)")
+        combustible = st.selectbox("Combustible", ["", "Nafta", "Diesel", "GNC", "Híbrido", "Eléctrico"])
+    
+    with col2:
+        modelo = st.text_input("Modelo *", placeholder="Ej: Corolla, Clio, Cruze")
+        kilometraje = st.number_input("Kilometraje (km) *", min_value=0, max_value=500000, value=50000, step=1000)
+        transmision = st.selectbox("Transmisión", ["", "Automática", "Manual", "CVT"])
+    
+    st.markdown("---")
+    
+    # Configuración de IA
+    st.subheader("🤖 Proveedor de Valuación")
+    
+    col_ia1, col_ia2 = st.columns(2)
+    
+    with col_ia1:
+        proveedor_valuacion = st.selectbox(
+            "Motor de Valuación",
+            ["mock", "ollama", "groq", "gemini"],
+            format_func=lambda x: {
+                "mock": "🧪 Demo (Sin IA real)",
+                "ollama": "🦙 Ollama (Local)",
+                "groq": "⚡ Groq (Cloud)",
+                "gemini": "🔷 Google Gemini (Cloud)"
+            }.get(x, x)
+        )
+    
+    with col_ia2:
+        if proveedor_valuacion == "ollama":
+            modelo_valuacion = st.text_input("Modelo Ollama", value="llama3.2")
+            api_key_valuacion = None
+        elif proveedor_valuacion == "groq":
+            modelo_valuacion = st.selectbox("Modelo Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"])
+            api_key_valuacion = st.text_input("API Key Groq", type="password")
+        elif proveedor_valuacion == "gemini":
+            modelo_valuacion = st.selectbox(
+                "Modelo Gemini", 
+                [
+                    "gemini-2.0-flash",
+                    "gemini-2.0-flash-exp",
+                    "gemini-1.5-flash",
+                    "gemini-1.5-pro",
+                    "gemini-exp-1206",
+                    "gemini-2.0-flash-thinking-exp",
+                    "gemini-3-flash-preview",
+                    "gemini-3-pro-preview"
+                ]
+            )
+            api_key_valuacion = st.text_input("API Key Gemini", type="password")
+        else:
+            modelo_valuacion = None
+            api_key_valuacion = None
+            st.info("Modo demo: genera valores de ejemplo sin consultar IA real")
+    
+    st.markdown("---")
+    
+    # Resumen de reglas activas
+    with st.expander("📋 Ver reglas activas que se aplicarán"):
+        reglas = api_get("/reglas") or []
+        if reglas:
+            reglas_por_tipo = {}
+            for r in reglas:
+                tipo = r.get('tipo', 'otro')
+                if tipo not in reglas_por_tipo:
+                    reglas_por_tipo[tipo] = []
+                reglas_por_tipo[tipo].append(r)
+            
+            # Ordenar según CLAVES_TIPOS (orden del README)
+            for tipo in CLAVES_TIPOS:
+                if tipo in reglas_por_tipo:
+                    lista = sorted(reglas_por_tipo[tipo], key=lambda x: x.get('orden', 0))
+                    st.markdown(f"**{TIPO_REGLA_LABELS.get(tipo, tipo)}** ({len(lista)})")
+                    for r in lista:
+                        st.caption(f"  • [{r.get('orden', 0)}] {r.get('nombre', 'Sin nombre')}")
+        else:
+            st.warning("No hay reglas configuradas. La valuación usará valores por defecto.")
+    
+    # Botón de valuación
+    st.markdown("---")
+    
+    puede_valuar = marca and modelo and año and kilometraje
+    
+    if proveedor_valuacion in ["groq", "gemini"] and not api_key_valuacion:
+        st.warning(f"⚠️ Ingrese la API Key de {proveedor_valuacion.title()} para continuar")
+        puede_valuar = False
+    
+    if st.button("🔍 Ejecutar Valuación", type="primary", use_container_width=True, disabled=not puede_valuar):
+        st.session_state.valuacion_en_proceso = True
+        
+        with st.spinner("⏳ Ejecutando valuación... Esto puede tomar unos segundos."):
+            payload = {
+                "marca": marca,
+                "modelo": modelo,
+                "año": año,
+                "kilometraje": kilometraje,
+                "version": version if version else None,
+                "transmision": transmision if transmision else None,
+                "combustible": combustible if combustible else None,
+                "proveedor_ia": proveedor_valuacion,
+                "modelo_ia": modelo_valuacion,
+                "api_key_ia": api_key_valuacion
+            }
+            
+            resultado = api_post("/valuaciones", payload, {"usuario_id": st.session_state.usuario_id})
+            
+            if resultado:
+                st.session_state.valuacion_resultado = resultado
+                st.session_state.valuacion_en_proceso = False
+                st.rerun()
+            else:
+                st.error("❌ Error al ejecutar la valuación")
+                st.session_state.valuacion_en_proceso = False
+    
+    # Mostrar resultado
+    if st.session_state.valuacion_resultado:
+        resultado = st.session_state.valuacion_resultado
+        
+        st.markdown("---")
+        st.subheader("📊 Resultado de la Valuación")
+        
+        # Precio principal
+        col_precio1, col_precio2, col_precio3 = st.columns(3)
+        
+        with col_precio1:
+            precio_min = resultado.get("precio_minimo")
+            if precio_min:
+                st.metric("💰 Precio Mínimo", f"${precio_min:,.0f}")
+        
+        with col_precio2:
+            precio_sug = resultado.get("precio_sugerido")
+            if precio_sug:
+                st.metric("⭐ Precio Sugerido", f"${precio_sug:,.0f}")
+            else:
+                st.warning("No se pudo calcular precio")
+        
+        with col_precio3:
+            precio_max = resultado.get("precio_maximo")
+            if precio_max:
+                st.metric("💎 Precio Máximo", f"${precio_max:,.0f}")
+        
+        # Confianza y métricas
+        col_met1, col_met2, col_met3 = st.columns(3)
+        
+        with col_met1:
+            confianza = resultado.get("confianza", "N/A")
+            color = {"ALTA": "🟢", "MEDIA": "🟡", "BAJA": "🔴"}.get(confianza, "⚪")
+            st.metric("Confianza", f"{color} {confianza}")
+        
+        with col_met2:
+            duracion = resultado.get("duracion_segundos")
+            if duracion:
+                st.metric("⏱️ Duración", f"{duracion:.1f}s")
+        
+        with col_met3:
+            analisis = resultado.get("analisis", {})
+            fuentes = analisis.get("fuentes_consultadas", 0)
+            st.metric("🌐 Fuentes", fuentes)
+        
+        # Alertas
+        alertas = resultado.get("alertas", [])
+        if alertas:
+            st.markdown("### ⚠️ Alertas")
+            for alerta in alertas:
+                st.warning(alerta)
+        
+        # Análisis detallado
+        with st.expander("📈 Análisis de Mercado"):
+            analisis = resultado.get("analisis", {})
+            if analisis:
+                col_a1, col_a2 = st.columns(2)
+                with col_a1:
+                    st.metric("Resultados iniciales", analisis.get("resultados_iniciales", 0))
+                    st.metric("Precio mercado mín", f"${analisis.get('precio_mercado_min', 0):,.0f}" if analisis.get('precio_mercado_min') else "N/A")
+                with col_a2:
+                    st.metric("Resultados tras filtrado", analisis.get("resultados_tras_depuracion", analisis.get("resultados_tras_filtrado", 0)))
+                    st.metric("Precio mercado máx", f"${analisis.get('precio_mercado_max', 0):,.0f}" if analisis.get('precio_mercado_max') else "N/A")
+        
+        # Reglas aplicadas
+        with st.expander("📋 Reglas Aplicadas"):
+            reglas_aplicadas = resultado.get("reglas_aplicadas", [])
+            if reglas_aplicadas:
+                for regla in reglas_aplicadas:
+                    st.markdown(f"• **{regla.get('codigo', 'N/A')}**: {regla.get('resultado', '')}")
+            else:
+                st.info("No se registraron reglas aplicadas")
+        
+        # Publicaciones analizadas
+        with st.expander("🔗 Publicaciones Analizadas"):
+            publicaciones = resultado.get("publicaciones", [])
+            if publicaciones:
+                df_pub = pd.DataFrame(publicaciones)
+                if 'precio' in df_pub.columns:
+                    df_pub['precio'] = df_pub['precio'].apply(lambda x: f"${x:,.0f}" if x else "N/A")
+                st.dataframe(df_pub, use_container_width=True)
+            else:
+                st.info("No hay publicaciones registradas")
+        
+        # Reporte completo
+        with st.expander("📄 Reporte Completo"):
+            reporte = resultado.get("reporte", "")
+            if reporte:
+                st.markdown(reporte)
+            else:
+                st.info("No hay reporte disponible")
+        
+        # Botón para nueva valuación
+        if st.button("🔄 Nueva Valuación"):
+            st.session_state.valuacion_resultado = None
+            st.rerun()
+
+
+# ============================================
+# HISTORIAL DE VALUACIONES
+# ============================================
+
+elif pagina == "📊 Historial Valuaciones":
+    st.title("📊 Historial de Valuaciones")
+    
+    valuaciones = api_get("/valuaciones")
+    
+    if valuaciones:
+        st.caption(f"Total: {len(valuaciones)} valuaciones")
+        
+        for val in valuaciones:
+            vehiculo = val.get("vehiculo", {})
+            precio = val.get("precio_sugerido")
+            confianza = val.get("confianza", "N/A")
+            fecha = val.get("fecha", "")
+            
+            titulo = f"{vehiculo.get('marca', '?')} {vehiculo.get('modelo', '?')} {vehiculo.get('año', '?')}"
+            precio_texto = f"${precio:,.0f}" if precio else "Sin precio"
+            
+            with st.expander(f"🚗 {titulo} - {precio_texto} ({confianza})"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown(f"**Vehículo:** {titulo}")
+                    st.markdown(f"**Precio Sugerido:** {precio_texto}")
+                    st.markdown(f"**Confianza:** {confianza}")
+                
+                with col2:
+                    st.markdown(f"**Fecha:** {fecha[:16] if fecha else 'N/A'}")
+                    duracion = val.get("duracion_segundos")
+                    st.markdown(f"**Duración:** {duracion:.1f}s" if duracion else "**Duración:** N/A")
+                    st.markdown(f"**ID:** `{val.get('id', '')[:8]}...`")
+                
+                if st.button("Ver detalle completo", key=f"det_{val.get('id')}"):
+                    detalle = api_get(f"/valuaciones/{val.get('id')}")
+                    if detalle:
+                        st.json(detalle)
+    else:
+        st.info("No hay valuaciones registradas. Ve a 'Valuar Vehículo' para crear una.")
+
+
+# ============================================
 # FOOTER
 # ============================================
 
 st.markdown("---")
-st.caption(f"Sistema de Valuación v2.1 | Usuario: {st.session_state.usuario_nombre} | {datetime.now().strftime('%H:%M')}")
+st.caption(f"Sistema de Valuación v2.4 | Usuario: {st.session_state.usuario_nombre} | {datetime.now().strftime('%H:%M')}")

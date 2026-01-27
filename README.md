@@ -283,7 +283,7 @@ curl "http://localhost:8000/reglas/{regla_id}/comparar?version_a=1&version_b=3"
 │           ↓                                                 │
 │  3. Se construye prompt dinámico con las reglas             │
 │           ↓                                                 │
-│  4. Agente Claude ejecuta búsqueda web                      │
+│  4. Agente Claude (o el que sea) ejecuta búsqueda web       │
 │           ↓                                                 │
 │  5. Se aplican filtros y depuración según reglas            │
 │           ↓                                                 │

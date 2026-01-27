@@ -279,7 +279,7 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
         # Llamar al agente
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=8000,
+            max_tokens=16000,
             system=system_prompt,
             tools=[{
                 "type": "web_search_20250305",
@@ -364,27 +364,52 @@ Responde con el JSON estructurado según el formato especificado.
 """
         return mensaje
     
-    def _procesar_respuesta(self, response) -> Dict[str, Any]:
-        """Procesa la respuesta del agente y extrae el JSON"""
+def _procesar_respuesta(self, response) -> Dict[str, Any]:
+        """Procesa la respuesta del agente y extrae el JSON de forma robusta"""
         texto = ""
-        for block in response.content:
-            if hasattr(block, 'text'):
-                texto += block.text
         
-        # Intentar extraer JSON
+        # 1. Extracción segura del texto (Maneja casos donde content es lista o string)
+        if isinstance(response.content, list):
+            for block in response.content:
+                if hasattr(block, 'text'):
+                    texto += block.text
+        else:
+            texto = str(response.content)
+        
+        # --- INICIO DEPURACIÓN ---
+        print("\n" + "="*50)
+        print("🤖 RESPUESTA CRUDA DE GEMINI:")
+        print(texto)
+        print("="*50 + "\n")
+        # --- FIN DEPURACIÓN ---
+
+        # 2. Limpieza de Markdown (Claude suele envolver en ```json)
+        texto_limpio = texto.replace("```json", "").replace("```", "").strip()
+
+        # 3. Intentar parseo directo primero
         try:
-            import re
-            # Buscar JSON en la respuesta
-            json_match = re.search(r'\{[\s\S]*\}', texto)
-            if json_match:
-                return json.loads(json_match.group())
+            return json.loads(texto_limpio)
         except json.JSONDecodeError:
             pass
+
+        # 4. Búsqueda con Regex (Si hay texto alrededor)
+        try:
+            import re
+            # Busca el primer { y el último }
+            json_match = re.search(r'(\{[\s\S]*\})', texto_limpio)
+            if json_match:
+                # Intenta parsear lo encontrado
+                return json.loads(json_match.group(1))
+        except (json.JSONDecodeError, AttributeError):
+            pass
         
-        # Si no se puede parsear, retornar estructura básica
+        # 5. Fallback: Retornar error estructurado para depuración
+        print(f"DEBUG - Texto recibido de IA que falló: {texto[:200]}...") # Log para ver qué llega
         return {
-            "reporte_detallado": texto,
-            "alertas": ["No se pudo parsear la respuesta estructurada"]
+            "precio_sugerido": 0,
+            "confianza": "ERROR_PARSEO",
+            "alertas": ["No se pudo parsear la respuesta estructurada"],
+            "reporte_detallado": f"La IA respondió pero no en formato JSON válido. Respuesta parcial: {texto[:500]}..."
         }
 
 
