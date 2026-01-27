@@ -1,0 +1,18 @@
+Condicion:
+hay que tener instalado Python 3.13.x 
+
+Crear el entorno virtual: primera vez
+py -3.13 -m venv venv
+
+Activar el entorno virtual:
+\venv\Scripts\activate
+
+Instalar depedencias:
+pip install -r requirements.txt
+
+lanzar backend
+cd .\backend\api
+python -m uvicorn main:app --reload --port 8000
+
+lanzar frontend
+streamlit run frontend/app.py
