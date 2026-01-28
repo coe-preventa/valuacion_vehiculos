@@ -126,6 +126,33 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
 - El "reporte_detallado" debe ser legible para humanos
 """
         return prompt
+
+    def _generar_queries_busqueda(self, vehiculo: Vehiculo, fuentes: list, filtros: list = None) -> list:
+        """Genera queries de búsqueda basadas en el vehículo, fuentes y filtros configurados."""
+        queries = []
+        terminos_vehiculo = f"{vehiculo.marca} {vehiculo.modelo} {vehiculo.año}"
+        if vehiculo.version:
+            terminos_vehiculo += f" {vehiculo.version}"
+            
+        # Enriquecer con filtros si están disponibles
+        if filtros:
+            for f in filtros:
+                params = f.get("parametros", {})
+                if params.get("campo") in ["transmision", "combustible"] and params.get("valor"):
+                    terminos_vehiculo += f" {params.get('valor')}"
+            
+        for f in fuentes:
+            params = f.get("parametros", {})
+            url = params.get("url", "")
+            if url and url.lower() not in ["web", "general", "internet", "toda la web"]:
+                queries.append(f"site:{url} {terminos_vehiculo}")
+            else:
+                queries.append(f"{terminos_vehiculo} precio argentina")
+        
+        if not queries:
+            queries.append(f"{terminos_vehiculo} precio argentina")
+            
+        return queries
     
     def _formatear_fuentes(self, fuentes: list) -> str:
         """Formatea la sección de fuentes para el prompt"""
@@ -273,8 +300,11 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
         # Construir prompt
         system_prompt = self._construir_system_prompt(config)
         
+        # Generar queries de búsqueda basadas en reglas
+        queries = self._generar_queries_busqueda(vehiculo, config.get("fuentes", []), config.get("filtros_busqueda", []))
+        
         # Construir mensaje del usuario
-        mensaje_usuario = self._construir_mensaje_vehiculo(vehiculo)
+        mensaje_usuario = self._construir_mensaje_vehiculo(vehiculo, queries)
         
         # Llamar al agente
         response = self.client.messages.create(
@@ -327,7 +357,7 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
         
         return valuacion
     
-    def _construir_mensaje_vehiculo(self, vehiculo: Vehiculo) -> str:
+    def _construir_mensaje_vehiculo(self, vehiculo: Vehiculo, queries: list = None) -> str:
         """Construye el mensaje con los datos del vehículo a valuar"""
         mensaje = f"""
 Realizá la valuación completa del siguiente vehículo aplicando TODAS las reglas configuradas:
@@ -349,11 +379,18 @@ Realizá la valuación completa del siguiente vehículo aplicando TODAS las regl
         if vehiculo.color:
             mensaje += f"• Color: {vehiculo.color}\n"
         
+        if queries:
+            mensaje += "\n══════════════════════════════════════\n"
+            mensaje += "      ESTRATEGIA DE BÚSQUEDA\n"
+            mensaje += "══════════════════════════════════════\n"
+            for i, q in enumerate(queries, 1):
+                mensaje += f"{i}. {q}\n"
+
         mensaje += """
 ══════════════════════════════════════
 
 Ejecutá el proceso completo:
-1. Buscá en TODAS las fuentes configuradas
+1. Buscá en internet usando la estrategia de búsqueda y las fuentes configuradas
 2. Aplicá TODOS los filtros y reglas de depuración
 3. Verificá los puntos de control
 4. Calculá el precio usando los métodos configurados
@@ -364,7 +401,7 @@ Responde con el JSON estructurado según el formato especificado.
 """
         return mensaje
     
-def _procesar_respuesta(self, response) -> Dict[str, Any]:
+    def _procesar_respuesta(self, response) -> Dict[str, Any]:
         """Procesa la respuesta del agente y extrae el JSON de forma robusta"""
         texto = ""
         

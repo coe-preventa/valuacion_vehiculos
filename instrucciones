@@ -9,6 +9,8 @@ Activar el entorno virtual:
 
 Instalar depedencias:
 pip install -r requirements.txt
+pip install duckduckgo-search
+
 
 lanzar backend
 cd .\backend\api

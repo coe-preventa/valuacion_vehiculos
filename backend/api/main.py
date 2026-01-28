@@ -10,8 +10,11 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+import re
 import sys
 import os
+import asyncio
+import httpx
 
 # Agregar path del backend
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,6 +35,14 @@ from services.agente_service import AgenteValuacionService, GeneradorPromptDinam
 # ============================================
 # CONFIGURACIÓN
 # ============================================
+
+# Configuración para Google Custom Search (100 búsquedas gratis/día)
+GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "")
+GOOGLE_SEARCH_CX = os.getenv("GOOGLE_SEARCH_CX", "") # ID del motor de búsqueda
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 
 DATABASE_URL = "sqlite:///./valuacion.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -130,6 +141,13 @@ class UsuarioCreate(BaseModel):
     nombre: str
     apellido: str
     rol: str = "vendedor"
+
+
+class BusquedaRequest(BaseModel):
+    marca: str
+    modelo: str
+    año: int
+    version: Optional[str] = None
 
 
 class VehiculoValuar(BaseModel):
@@ -559,6 +577,102 @@ async def obtener_vehiculo(vehiculo_id: str, db: Session = Depends(get_db)):
 # ENDPOINTS - VALUACIONES
 # ============================================
 
+def extraer_dominio_limpio(url: str) -> str:
+    """Extrae solo el dominio base de una URL para el operador site:"""
+    if not url: return ""
+    # Quitar protocolo
+    url = re.sub(r'^https?://', '', url)
+    # Quitar paths y queries
+    url = url.split('/')[0].split('?')[0]
+    # Quitar www.
+    url = re.sub(r'^www\.', '', url)
+    return url.lower()
+
+def filtrar_resultados_por_fuentes(resultados: List[Dict], fuentes: List[Dict]) -> List[Dict]:
+    """Filtra una lista de resultados para que solo contenga los dominios permitidos en las reglas."""
+    dominios_permitidos = []
+    busqueda_abierta = False
+    
+    if not fuentes:
+        busqueda_abierta = True
+    
+    for f in fuentes:
+        url = f.get('parametros', {}).get('url', '')
+        if not url or url.lower() in ["web", "general", "internet", "toda la web"]:
+            busqueda_abierta = True
+            break
+        dominios_permitidos.append(extraer_dominio_limpio(url))
+    
+    if busqueda_abierta or not dominios_permitidos:
+        return resultados
+        
+    resultados_filtrados = []
+    for r in resultados:
+        dom_r = extraer_dominio_limpio(r['url'])
+        if any(p in dom_r for p in dominios_permitidos):
+            resultados_filtrados.append(r)
+            
+    return resultados_filtrados
+
+@app.post("/buscar_urls", tags=["Valuaciones"])
+async def buscar_urls(request: BusquedaRequest, db: Session = Depends(get_db)):
+    """
+    Realiza únicamente la búsqueda de publicaciones en la web utilizando las reglas de fuente y filtro.
+    """
+    # Obtener configuración de reglas
+    service = ReglasService(db)
+    config = service.generar_configuracion_prompt()
+    fuentes = config.get("fuentes", [])
+    
+    # Crear un objeto Vehiculo temporal para usar la lógica de generación de queries
+    vehiculo_temp = Vehiculo(
+        marca=request.marca,
+        modelo=request.modelo,
+        año=request.año,
+        version=request.version,
+        kilometraje=0
+    )
+    
+    queries = generar_queries_busqueda_desde_config(vehiculo_temp, config)
+    urls_directas = generar_urls_directas_portales(vehiculo_temp, config)
+    
+    resultados = []
+    fuente_usada = "Ninguna"
+
+    # PASO 1: Intentar descubrimiento directo en portales (Más preciso)
+    for portal_url in urls_directas:
+        print(f"🚀 Intentando descubrimiento directo en: {portal_url}")
+        res_directos = await descubrir_publicaciones_en_portal(portal_url)
+        if res_directos:
+            resultados.extend(res_directos)
+            fuente_usada = "Descubrimiento Directo"
+        
+        if len(resultados) >= 15: break
+    
+    # PASO 2: Si no hay suficientes, usar DuckDuckGo como respaldo
+    if len(resultados) < 5:
+        for query in queries:
+            print(f"🔍 Buscando en DuckDuckGo: {query}")
+            res_ddg = buscar_en_web_gratis(query)
+            if res_ddg:
+                urls_existentes = {r['url'] for r in resultados}
+                for r in res_ddg:
+                    if r['url'] not in urls_existentes:
+                        resultados.append(r)
+                if fuente_usada == "Ninguna":
+                    fuente_usada = "DuckDuckGo"
+            
+            await asyncio.sleep(0.5)
+
+            # Si ya tenemos una buena base de resultados, no seguimos buscando
+            if len(resultados) >= 8:
+                break
+            
+    # Filtrar resultados para asegurar que coincidan con las fuentes de las reglas
+    resultados_filtrados = filtrar_resultados_por_fuentes(resultados, fuentes)
+    
+    return {"resultados": resultados_filtrados, "fuente": fuente_usada, "queries": queries}
+
 class ValuacionRequest(BaseModel):
     vehiculo_id: Optional[str] = None
     # O datos directos del vehículo
@@ -573,6 +687,7 @@ class ValuacionRequest(BaseModel):
     proveedor_ia: str = "mock"  # mock, ollama, groq, gemini
     modelo_ia: Optional[str] = None
     api_key_ia: Optional[str] = None
+    urls_previas: Optional[List[Dict]] = None
 
 
 class ValuacionResponse(BaseModel):
@@ -642,7 +757,8 @@ async def crear_valuacion(
             config=config,
             proveedor=request.proveedor_ia,
             modelo=request.modelo_ia,
-            api_key=request.api_key_ia
+            api_key=request.api_key_ia,
+            urls_previas=request.urls_previas
         )
     
     duracion = time.time() - inicio
@@ -769,6 +885,243 @@ async def obtener_valuacion(valuacion_id: str, db: Session = Depends(get_db)):
 # FUNCIONES DE VALUACIÓN
 # ============================================
 
+def slugify(text: str) -> str:
+    """Limpia texto para usar en URLs"""
+    if not text: return ""
+    text = text.lower()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[\s_-]+', '-', text)
+    return text.strip('-')
+
+def generar_urls_directas_portales(vehiculo: Vehiculo, config: Dict) -> List[str]:
+    """Construye URLs de búsqueda interna para portales conocidos aplicando filtros."""
+    urls = []
+    marca = slugify(vehiculo.marca)
+    modelo = slugify(vehiculo.modelo)
+    anio = vehiculo.año
+    
+    filtros = config.get("filtros_busqueda", [])
+    transmision = ""
+    for f in filtros:
+        if f.get("parametros", {}).get("campo") == "transmision":
+            transmision = slugify(vehiculo.transmision or "")
+
+    # Estrategia Kavak Argentina
+    # Formato: https://www.kavak.com/ar/autos-usados/toyota/yaris/anio-2020
+    url_kavak = f"https://www.kavak.com/ar/autos-usados/{marca}/{modelo}/anio-{anio}"
+    if transmision:
+        url_kavak += f"/transmision-{transmision}"
+    urls.append(url_kavak)
+
+    # Estrategia MercadoLibre Argentina
+    # Formato: https://autos.mercadolibre.com.ar/toyota/yaris/2020/
+    url_ml = f"https://autos.mercadolibre.com.ar/{marca}/{modelo}/{anio}/"
+    urls.append(url_ml)
+    
+    # Estrategia Autocosmos
+    url_ac = f"https://www.autocosmos.com.ar/auto/usado/{marca}/{modelo}/{anio}"
+    urls.append(url_ac)
+
+    return urls
+
+async def descubrir_publicaciones_en_portal(url_busqueda: str) -> List[Dict]:
+    """Navega a la URL de búsqueda e intenta extraer links de publicaciones individuales."""
+    resultados = []
+    
+    # Si es una query de descubrimiento, primero buscamos la URL real en DuckDuckGo
+    if url_busqueda.startswith("DISCOVERY_QUERY:"):
+        query = url_busqueda.replace("DISCOVERY_QUERY:", "")
+        print(f"🔍 Descubriendo estructura para: {query}")
+        busqueda_previa = buscar_en_web_gratis(query)
+        if not busqueda_previa:
+            return []
+        # Tomamos la primera URL que parezca un listado o catálogo
+        url_busqueda = busqueda_previa[0]['url']
+        print(f"📍 URL de catálogo descubierta: {url_busqueda}")
+
+    dominio = extraer_dominio_limpio(url_busqueda)
+    
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=15.0, follow_redirects=True) as client:
+            response = await client.get(url_busqueda)
+            if response.status_code != 200:
+                return []
+            
+            html = response.text
+            
+            # Patrones de Regex optimizados para encontrar fichas de vehículos
+            # Estos patrones buscan links que suelen ser las fichas de los autos
+            patrones = {
+                "kavak.com": r'href="(/ar/(?:venta|comprar)/[^"]+)"',
+                "mercadolibre.com.ar": r'href="(https://articulo\.mercadolibre\.com\.ar/MLA-[^"]+)"',
+                "autocosmos.com.ar": r'href="(/auto/usado/[^"]+)"',
+                "demotores.com.ar": r'href="(/unidades/[^"]+)"'
+            }
+            
+            regex = None
+            for d, p in patrones.items():
+                if d in dominio:
+                    regex = p
+                    break
+            
+            if not regex:
+                # Heurística: Buscamos links que contengan palabras clave de ventas
+                # y que no sean redes sociales o links de sistema
+                regex = r'href="([^"]*(?:articulo|producto|venta|auto|vehiculo|p/|unidad)[^"]+)"'
+
+            matches = re.findall(regex, html, re.IGNORECASE)
+            # Limpiar duplicados y completar URLs relativas
+            urls_vistas = set()
+            for m in matches:
+                full_url = m
+                if m.startswith("/"):
+                    base = "https://" + dominio
+                    full_url = base + m
+                
+                # Filtrar links que claramente no son publicaciones (redes sociales, etc)
+                if any(x in full_url.lower() for x in ['facebook', 'twitter', 'instagram', 'whatsapp', 'share']):
+                    continue
+                
+                if full_url not in urls_vistas and len(resultados) < 10:
+                    urls_vistas.add(full_url)
+                    # Intentar extraer un título amigable de la URL
+                    titulo = full_url.split("/")[-1].replace("-", " ").title()
+                    if len(titulo) > 50: titulo = titulo[:47] + "..."
+                    
+                    resultados.append({
+                        "titulo": titulo,
+                        "url": full_url,
+                        "snippet": f"Publicación encontrada directamente en {dominio}"
+                    })
+                    
+    except Exception as e:
+        print(f"⚠️ Error navegando en {url_busqueda}: {e}")
+        
+    return resultados
+
+def generar_queries_busqueda_desde_config(vehiculo: Vehiculo, config: Dict) -> List[str]:
+    """Genera queries de búsqueda basadas en el vehículo y las reglas configuradas."""
+    fuentes = config.get("fuentes", [])
+    filtros = config.get("filtros_busqueda", [])
+    
+    terminos_base = f"{vehiculo.marca} {vehiculo.modelo} {vehiculo.año}"
+    if vehiculo.version:
+        terminos_base += f" {vehiculo.version}"
+        
+    # Las reglas de filtro definen QUÉ campos del vehículo real incluir en la búsqueda
+    filtros_adicionales = ""
+    for f in filtros:
+        params = f.get("parametros", {})
+        campo = params.get("campo")
+        if campo == "transmision" and vehiculo.transmision:
+            filtros_adicionales += f" {vehiculo.transmision}"
+        elif campo == "combustible" and vehiculo.combustible:
+            filtros_adicionales += f" {vehiculo.combustible}"
+            
+    terminos_completos = terminos_base + filtros_adicionales
+            
+    queries = []
+    for f in fuentes:
+        url = f.get('parametros', {}).get('url')
+        if url and url.lower() not in ["web", "general", "internet", "toda la web"]:
+            queries.append(f"site:{url} {terminos_completos}")
+        else:
+            queries.append(f"{terminos_completos} precio Argentina")
+            
+    # Fallbacks progresivos: del más específico al más general para asegurar resultados
+    fallbacks = [
+        f"{terminos_completos} precio Argentina",
+        f"{terminos_base} precio Argentina",
+        f"{vehiculo.marca} {vehiculo.modelo} {vehiculo.año} precio"
+    ]
+    
+    for fb in fallbacks:
+        if fb not in queries:
+            queries.append(fb)
+        
+    return queries
+
+def buscar_en_web_gratis(query: str) -> List[Dict[str, Any]]:
+    """
+    Realiza una búsqueda web gratuita usando DuckDuckGo (sin API Key).
+    Requiere: pip install duckduckgo-search
+    """
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = []
+            try:
+                # Para queries con 'site:', evitamos la región ya que el dominio ya limita el alcance
+                # y DuckDuckGo suele fallar al combinar ambos filtros.
+                if "site:" in query:
+                    print(f"🌐 Consultando DuckDuckGo (Global para site:): '{query}'")
+                    results = list(ddgs.text(query, max_results=10))
+                else:
+                    # Intentar con región Argentina
+                    print(f"🌐 Consultando DuckDuckGo (AR): '{query}'")
+                    results = list(ddgs.text(query, region='ar-es', max_results=10))
+            except Exception as e:
+                print(f"🌐 Error en búsqueda regional AR: {e}")
+
+            # Si no hay resultados o hubo un error, intentar búsqueda global (más permisiva)
+            if not results:
+                print(f"🌐 Sin resultados en AR o error, intentando búsqueda global para: '{query}'")
+                try:
+                    results = list(ddgs.text(query, max_results=10))
+                except Exception as e:
+                    print(f"🌐 Error en búsqueda global: {e}")
+                
+            print(f"✅ DuckDuckGo devolvió {len(results)} resultados.")
+            return [{
+                "titulo": r.get("title"),
+                "url": r.get("href"),
+                "snippet": r.get("body")
+            } for r in results]
+    except ImportError:
+        print("⚠️ Librería duckduckgo-search no instalada. Ejecute: pip install duckduckgo-search")
+    except Exception as e:
+        print(f"Error en búsqueda alternativa: {e}")
+    return []
+
+async def buscar_en_google_custom_search(query: str, api_key: str, cx: str) -> List[Dict[str, Any]]:
+    """
+    Realiza una búsqueda usando Google Custom Search JSON API (100 gratis/día).
+    """
+    import httpx
+    
+    if not api_key or not cx:
+        return []
+
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        "key": api_key,
+        "cx": cx,
+        "q": query,
+        "num": 5 # Traer los primeros 5 resultados
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get("items", [])
+                resultados = [{
+                    "titulo": item.get("title"),
+                    "url": item.get("link"),
+                    "snippet": item.get("snippet")
+                } for item in items]
+                
+                if not resultados:
+                    print(f"⚠️ Google Search no devolvió resultados para: '{query}'.")
+                
+                return resultados
+            else:
+                print(f"❌ Error en Google Search API: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"Error en Google Custom Search: {e}")
+    return []
+
 def ejecutar_valuacion_mock(vehiculo: Vehiculo, config: Dict) -> Dict[str, Any]:
     """
     Valuación de demostración sin IA real.
@@ -879,7 +1232,8 @@ async def ejecutar_valuacion_ia(
     config: Dict,
     proveedor: str,
     modelo: Optional[str],
-    api_key: Optional[str]
+    api_key: Optional[str],
+    urls_previas: Optional[List[Dict]] = None
 ) -> Dict[str, Any]:
     """
     Ejecuta valuación con IA real (Ollama, Groq, Gemini).
@@ -890,15 +1244,60 @@ async def ejecutar_valuacion_ia(
     # Construir prompt
     prompt = construir_prompt_valuacion(vehiculo, config)
     
+    # Usar URLs proporcionadas o realizar búsqueda nueva
+    resultados_busqueda = urls_previas
+    
+    if not resultados_busqueda:
+        # Opcional: Realizar búsqueda previa si tenemos las llaves de Google Search
+        # Esto permite inyectar resultados reales incluso a modelos que no tienen Search nativo
+        queries = generar_queries_busqueda_desde_config(vehiculo, config)
+        resultados_busqueda = []
+        
+        for query in queries:
+            print(f"🔍 Buscando en DuckDuckGo: {query}")
+            res_ddg = buscar_en_web_gratis(query)
+            if res_ddg:
+                urls_existentes = {r['url'] for r in resultados_busqueda}
+                for r in res_ddg:
+                    if r['url'] not in urls_existentes:
+                        resultados_busqueda.append(r)
+            
+            await asyncio.sleep(0.5)
+            
+            if len(resultados_busqueda) >= 10:
+                break
+
+        # Filtrar resultados para asegurar que coincidan con las fuentes de las reglas
+        resultados_busqueda = filtrar_resultados_por_fuentes(resultados_busqueda, config.get("fuentes", []))
+
+    if resultados_busqueda:
+        prompt += f"\n\nRESULTADOS REALES DE BÚSQUEDA WEB:\n{json.dumps(resultados_busqueda, indent=2)}"
+
     try:
+        resultado = {}
         if proveedor == "ollama":
-            return await valuacion_ollama(prompt, modelo or "llama3.2")
+            resultado = await valuacion_ollama(prompt, modelo or "llama3.2")
         elif proveedor == "groq":
-            return await valuacion_groq(prompt, modelo or "llama-3.3-70b-versatile", api_key)
+            resultado = await valuacion_groq(prompt, modelo or "llama-3.3-70b-versatile", api_key)
         elif proveedor == "gemini":
-            return await valuacion_gemini(prompt, modelo or "gemini-2.0-flash", api_key)
+            resultado = await valuacion_gemini(prompt, modelo or "gemini-2.0-flash", api_key)
         else:
             raise ValueError(f"Proveedor no soportado: {proveedor}")
+            
+        # Si la IA no devolvió publicaciones pero DuckDuckGo sí encontró resultados,
+        # los agregamos manualmente para asegurar visibilidad en el frontend
+        if not resultado.get("publicaciones") and resultados_busqueda:
+            resultado["publicaciones"] = [
+                {
+                    "fuente": "DuckDuckGo / Web",
+                    "precio": None,
+                    "url": r["url"],
+                    "titulo": r["titulo"],
+                    "incluida": False
+                } for r in resultados_busqueda
+            ]
+        return resultado
+
     except Exception as e:
         return {
             "precio_sugerido": None,
@@ -912,17 +1311,29 @@ def construir_prompt_valuacion(vehiculo: Vehiculo, config: Dict) -> str:
     """Construye el prompt para la valuación"""
     
     fuentes = config.get("fuentes", [])
+    filtros = config.get("filtros_busqueda", [])
+    
     fuentes_texto = "\n".join([
         f"  - {f.get('parametros', {}).get('url', 'N/A')}" 
         for f in fuentes
     ]) or "  - kavak.com.ar\n  - autos.mercadolibre.com.ar"
     
+    filtros_texto = "\n".join([
+        f"  - {f.get('nombre', 'Filtro')}: {f.get('parametros', {})}"
+        for f in filtros
+    ]) or "  - Usar criterios de similitud estándar (año ±1, km ±15000)"
+
     ajustes = config.get("ajustes_calculo", [])
     ajustes_texto = "\n".join([
         f"  - {a.get('nombre', 'Ajuste')}: {a.get('parametros', {})}"
         for a in ajustes
     ]) or "  - Sin ajustes configurados"
     
+    # Generar queries de búsqueda dinámicas basadas en fuentes y filtros
+    queries_busqueda = generar_queries_busqueda_desde_config(vehiculo, config)
+
+    queries_texto = "\n".join([f"{i+1}. {q}" for i, q in enumerate(queries_busqueda)])
+
     return f"""
 Eres un experto en valuación de vehículos usados en Argentina. Tu tarea es buscar precios REALES y actuales.
 
@@ -938,7 +1349,8 @@ VEHÍCULO A VALUAR:
 INSTRUCCIONES IMPORTANTES:
 1. BUSCA en internet precios actuales de {vehiculo.marca} {vehiculo.modelo} {vehiculo.año} en Argentina
 2. Consulta sitios como Kavak, MercadoLibre Autos, DeMotores, AutoCosmos
-3. Busca publicaciones con características similares (año ±1, km similares)
+3. APLICA ESTRICTAMENTE estos filtros de búsqueda:
+{filtros_texto}
 4. Recopila al menos 5-10 precios de publicaciones reales
 5. Calcula el precio promedio, mediana, mínimo y máximo del mercado
 
@@ -948,13 +1360,8 @@ FUENTES PRIORITARIAS:
 AJUSTES A APLICAR DESPUÉS DEL CÁLCULO:
 {ajustes_texto}
 
-PROCESO:
-1. Buscar "{vehiculo.marca} {vehiculo.modelo} {vehiculo.año} precio Argentina"
-2. Buscar en "kavak.com {vehiculo.marca} {vehiculo.modelo}"
-3. Buscar en "autos.mercadolibre.com.ar {vehiculo.marca} {vehiculo.modelo} {vehiculo.año}"
-4. Recopilar precios encontrados
-5. Calcular estadísticas
-6. Aplicar ajustes configurados
+ESTRATEGIA DE BÚSQUEDA RECOMENDADA:
+{queries_texto}
 
 Responde ÚNICAMENTE con un JSON válido:
 

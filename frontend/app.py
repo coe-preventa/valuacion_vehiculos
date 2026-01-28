@@ -23,6 +23,8 @@ if "usuario_nombre" not in st.session_state:
     st.session_state.usuario_nombre = None
 if "json_generado" not in st.session_state:
     st.session_state.json_generado = None
+if "urls_encontradas" not in st.session_state:
+    st.session_state.urls_encontradas = None
 if "tipo_detectado" not in st.session_state:
     st.session_state.tipo_detectado = "fuente"
 
@@ -236,6 +238,7 @@ Este sistema ayuda a vendedores de autos usados a determinar el precio de venta 
 - Fuentes específicas por país o región (Argentina, México, Chile)
 - Fuentes especializadas por tipo de vehículo (autos de lujo, comerciales, etc.)
 - Excluir o deshabilitar una fuente temporalmente
+- Si se desea buscar en todo internet sin restricciones, usar "web" o "general" como url.
 
 **PALABRAS CLAVE:** kavak, mercadolibre, autocosmos, demotores, olx, seminuevos, sitio, portal, web, url, .com, página, fuente, plataforma, consultar, buscar en, agregar fuente, quitar fuente, prioridad, principal, secundaria, confiable, verificado
 
@@ -1489,38 +1492,76 @@ elif pagina == "🚗 Valuar Vehículo":
     # Botón de valuación
     st.markdown("---")
     
-    puede_valuar = marca and modelo and año and kilometraje
+    col_btn_val1, col_btn_val2 = st.columns(2)
     
-    if proveedor_valuacion in ["groq", "gemini"] and not api_key_valuacion:
-        st.warning(f"⚠️ Ingrese la API Key de {proveedor_valuacion.title()} para continuar")
-        puede_valuar = False
-    
-    if st.button("🔍 Ejecutar Valuación", type="primary", use_container_width=True, disabled=not puede_valuar):
-        st.session_state.valuacion_en_proceso = True
+    with col_btn_val1:
+        if st.button("🔍 1. Buscar Publicaciones", use_container_width=True, disabled=not (marca and modelo)):
+            with st.spinner("Buscando en la web (DuckDuckGo/Google)..."):
+                payload_busqueda = {
+                    "marca": marca,
+                    "modelo": modelo,
+                    "año": año,
+                    "version": version if version else None
+                }
+                res_busqueda = api_post("/buscar_urls", payload_busqueda)
+                if res_busqueda:
+                    st.session_state.urls_encontradas = res_busqueda.get("resultados", [])
+                    fuente_usada = res_busqueda.get("fuente", "Web")
+                    queries_usadas = res_busqueda.get("queries", [])
+                    
+                    if queries_usadas:
+                        with st.expander("🔎 Ver historial de búsquedas intentadas"):
+                            for i, q in enumerate(queries_usadas):
+                                st.write(f"{i+1}. `{q}`")
+                        # Mostrar la última (la que debería haber traído resultados)
+                        st.info(f"🔎 **Última consulta:** `{queries_usadas[-1]}`")
+                    
+                    if st.session_state.urls_encontradas:
+                        st.success(f"✅ Se hallaron {len(st.session_state.urls_encontradas)} publicaciones potenciales usando {fuente_usada}.")
+                    else:
+                        st.warning(f"⚠️ No se hallaron publicaciones potenciales usando {fuente_usada}. Verifique que las reglas de filtro no sean demasiado restrictivas.")
+                else:
+                    st.error("No se hallaron publicaciones.")
+
+    # Mostrar URLs halladas si existen
+    if st.session_state.urls_encontradas:
+        st.subheader("🔗 Publicaciones Halladas")
+        df_urls = pd.DataFrame(st.session_state.urls_encontradas)
+        st.dataframe(df_urls, use_container_width=True)
         
-        with st.spinner("⏳ Ejecutando valuación... Esto puede tomar unos segundos."):
-            payload = {
-                "marca": marca,
-                "modelo": modelo,
-                "año": año,
-                "kilometraje": kilometraje,
-                "version": version if version else None,
-                "transmision": transmision if transmision else None,
-                "combustible": combustible if combustible else None,
-                "proveedor_ia": proveedor_valuacion,
-                "modelo_ia": modelo_valuacion,
-                "api_key_ia": api_key_valuacion
-            }
-            
-            resultado = api_post("/valuaciones", payload, {"usuario_id": st.session_state.usuario_id})
-            
-            if resultado:
-                st.session_state.valuacion_resultado = resultado
-                st.session_state.valuacion_en_proceso = False
-                st.rerun()
-            else:
-                st.error("❌ Error al ejecutar la valuación")
-                st.session_state.valuacion_en_proceso = False
+        with col_btn_val2:
+            puede_valuar = True
+            if proveedor_valuacion in ["groq", "gemini"] and not api_key_valuacion:
+                st.warning(f"⚠️ Falta API Key de {proveedor_valuacion}")
+                puede_valuar = False
+                
+            if st.button("🤖 2. Calcular Precio con IA", type="primary", use_container_width=True, disabled=not puede_valuar):
+                st.session_state.valuacion_en_proceso = True
+                
+                with st.spinner("⏳ La IA está analizando las publicaciones..."):
+                    payload = {
+                        "marca": marca,
+                        "modelo": modelo,
+                        "año": año,
+                        "kilometraje": kilometraje,
+                        "version": version if version else None,
+                        "transmision": transmision if transmision else None,
+                        "combustible": combustible if combustible else None,
+                        "proveedor_ia": proveedor_valuacion,
+                        "modelo_ia": modelo_valuacion,
+                        "api_key_ia": api_key_valuacion,
+                        "urls_previas": st.session_state.urls_encontradas
+                    }
+                    
+                    resultado = api_post("/valuaciones", payload, {"usuario_id": st.session_state.usuario_id})
+                    
+                    if resultado:
+                        st.session_state.valuacion_resultado = resultado
+                        st.session_state.valuacion_en_proceso = False
+                        st.rerun()
+                    else:
+                        st.error("❌ Error al ejecutar la valuación")
+                        st.session_state.valuacion_en_proceso = False
     
     # Mostrar resultado
     if st.session_state.valuacion_resultado:
@@ -1617,6 +1658,7 @@ elif pagina == "🚗 Valuar Vehículo":
         # Botón para nueva valuación
         if st.button("🔄 Nueva Valuación"):
             st.session_state.valuacion_resultado = None
+            st.session_state.urls_encontradas = None
             st.rerun()
 
 

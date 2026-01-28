@@ -251,7 +251,7 @@ curl "http://localhost:8000/reglas/{regla_id}/comparar?version_a=1&version_b=3"
 │                                                             │
 │  1. Usuario escribe descripción en lenguaje natural         │
 │           ↓                                                 │
-│  2. Selecciona proveedor IA (Ollama/Groq/Gemini)           │
+│  2. Selecciona proveedor IA (Ollama/Groq/Gemini)            │
 │           ↓                                                 │
 │  3. Click en "Generar"                                      │
 │           ↓                                                 │
