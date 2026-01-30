@@ -3,6 +3,14 @@
 API REST para el sistema de valuación de vehículos.
 Endpoints para gestión de reglas, usuarios y valuaciones.
 """
+import asyncio
+import sys
+
+# CONFIGURACIÓN CRÍTICA PARA WINDOWS: Debe ejecutarse antes de cualquier importación de FastAPI/AnyIO
+if sys.platform == 'win32' and not isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
+    policy = asyncio.WindowsProactorEventLoopPolicy()
+    asyncio.set_event_loop_policy(policy)
+    print(f"✅ [API] Política de loop establecida: {type(policy).__name__}")
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,13 +19,13 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 import re
-import sys
+import json
 import os
-import asyncio
 import httpx
 
 # Agregar path del backend
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from fastapi.responses import StreamingResponse
 
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
@@ -30,6 +38,7 @@ from models import (
 )
 from services.reglas_service import ReglasService
 from services.agente_service import AgenteValuacionService, GeneradorPromptDinamico
+from services.browser_service import BrowserService
 
 
 # ============================================
@@ -44,7 +53,9 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-DATABASE_URL = "sqlite:///./valuacion.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(BASE_DIR, "valuacion.db")
+DATABASE_URL = f"sqlite:///{db_path}"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -148,6 +159,9 @@ class BusquedaRequest(BaseModel):
     modelo: str
     año: int
     version: Optional[str] = None
+    proveedor_ia: str = "ollama"
+    modelo_ia: Optional[str] = None
+    api_key_ia: Optional[str] = None
 
 
 class VehiculoValuar(BaseModel):
@@ -619,59 +633,47 @@ async def buscar_urls(request: BusquedaRequest, db: Session = Depends(get_db)):
     """
     Realiza únicamente la búsqueda de publicaciones en la web utilizando las reglas de fuente y filtro.
     """
-    # Obtener configuración de reglas
-    service = ReglasService(db)
-    config = service.generar_configuracion_prompt()
-    fuentes = config.get("fuentes", [])
-    
-    # Crear un objeto Vehiculo temporal para usar la lógica de generación de queries
-    vehiculo_temp = Vehiculo(
-        marca=request.marca,
-        modelo=request.modelo,
-        año=request.año,
-        version=request.version,
-        kilometraje=0
-    )
-    
-    queries = generar_queries_busqueda_desde_config(vehiculo_temp, config)
-    urls_directas = generar_urls_directas_portales(vehiculo_temp, config)
-    
-    resultados = []
-    fuente_usada = "Ninguna"
-
-    # PASO 1: Intentar descubrimiento directo en portales (Más preciso)
-    for portal_url in urls_directas:
-        print(f"🚀 Intentando descubrimiento directo en: {portal_url}")
-        res_directos = await descubrir_publicaciones_en_portal(portal_url)
-        if res_directos:
-            resultados.extend(res_directos)
-            fuente_usada = "Descubrimiento Directo"
+    async def event_generator():
+        service_reglas = ReglasService(db)
+        config = service_reglas.generar_configuracion_prompt()
+        fuentes = config.get("fuentes", [])
+        filtros_reglas = config.get("filtros_busqueda", [])
         
-        if len(resultados) >= 15: break
-    
-    # PASO 2: Si no hay suficientes, usar DuckDuckGo como respaldo
-    if len(resultados) < 5:
-        for query in queries:
-            print(f"🔍 Buscando en DuckDuckGo: {query}")
-            res_ddg = buscar_en_web_gratis(query)
-            if res_ddg:
-                urls_existentes = {r['url'] for r in resultados}
-                for r in res_ddg:
-                    if r['url'] not in urls_existentes:
-                        resultados.append(r)
-                if fuente_usada == "Ninguna":
-                    fuente_usada = "DuckDuckGo"
-            
-            await asyncio.sleep(0.5)
+        vehiculo_temp = Vehiculo(
+            marca=request.marca, modelo=request.modelo,
+            año=request.año, version=request.version
+        )
+        
+        browser = BrowserService()
+        resultados_totales = []
 
-            # Si ya tenemos una buena base de resultados, no seguimos buscando
-            if len(resultados) >= 8:
-                break
+        # Si no hay fuentes configuradas, usar una por defecto
+        fuentes_a_procesar = fuentes if fuentes else [{"parametros": {"url": "https://www.kavak.com/ar/usados"}}]
+
+        for fuente in fuentes_a_procesar:
+            url = fuente.get("parametros", {}).get("url", "")
+            if not url.startswith("http"): url = f"https://{url}"
             
-    # Filtrar resultados para asegurar que coincidan con las fuentes de las reglas
-    resultados_filtrados = filtrar_resultados_por_fuentes(resultados, fuentes)
-    
-    return {"resultados": resultados_filtrados, "fuente": fuente_usada, "queries": queries}
+            async for update in browser.buscar_inteligente(
+                url, 
+                vehiculo_temp, 
+                filtros_reglas,
+                proveedor=request.proveedor_ia,
+                modelo=request.modelo_ia,
+                api_key=request.api_key_ia
+            ):
+                if "data" in update:
+                    resultados_totales.extend(update["data"])
+                yield json.dumps(update) + "\n"
+
+        # Al finalizar, enviar el consolidado
+        yield json.dumps({
+            "step": "🏁 Búsqueda finalizada",
+            "status": "done",
+            "resultados": resultados_totales
+        }) + "\n"
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 class ValuacionRequest(BaseModel):
     vehiculo_id: Optional[str] = None

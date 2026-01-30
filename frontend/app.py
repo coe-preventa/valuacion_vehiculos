@@ -27,6 +27,8 @@ if "urls_encontradas" not in st.session_state:
     st.session_state.urls_encontradas = None
 if "tipo_detectado" not in st.session_state:
     st.session_state.tipo_detectado = "fuente"
+if "detener_busqueda" not in st.session_state:
+    st.session_state.detener_busqueda = False
 
 
 # ============================================
@@ -895,17 +897,33 @@ def verificar_ollama() -> tuple:
 
 # Helpers API
 def api_get(ep): 
-    try: return requests.get(f"{API_URL}{ep}").json()
-    except: return None
+    try:
+        response = requests.get(f"{API_URL}{ep}", timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        st.error(f"Error del servidor ({response.status_code}): {response.text}")
+        return None
+    except Exception as e:
+        st.error(f"Error de conexión con el backend: {e}")
+        return None
 
 def api_post(ep, d, p=None): 
-    try: return requests.post(f"{API_URL}{ep}", json=d, params=p).json()
-    except Exception as e: st.error(f"Error: {e}"); return None
+    try:
+        response = requests.post(f"{API_URL}{ep}", json=d, params=p, timeout=10)
+        if response.status_code in [200, 201]:
+            return response.json()
+        st.error(f"Error al guardar ({response.status_code}): {response.text}")
+        return None
+    except Exception as e: st.error(f"Error de red: {e}"); return None
 
 def api_put(ep, d, p=None): 
-    try: return requests.put(f"{API_URL}{ep}", json=d, params=p).json()
-    except Exception as e: st.error(f"Error: {e}"); return None
-
+    try:
+        response = requests.put(f"{API_URL}{ep}", json=d, params=p, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        st.error(f"Error al actualizar ({response.status_code}): {response.text}")
+        return None
+    except Exception as e: st.error(f"Error de red: {e}"); return None
 
 # Orden según README: 1.Fuente, 2.Filtro, 3.Ajuste, 4.Depuración, 5.Muestreo, 6.Control, 7.Método
 TIPO_REGLA_LABELS = {
@@ -939,46 +957,28 @@ CLAVES_TIPOS = list(TIPO_REGLA_LABELS.keys())
 with st.sidebar:
     st.title("🚗 Valuación")
     st.markdown("---")
-    st.subheader("🤖 Configuración IA")
-    ollama_ok, ollama_modelos = verificar_ollama()
     
-    proveedor_ia = st.selectbox("Proveedor", ["ollama", "groq", "gemini"])
-    
-    api_key_ia = ""
-    modelo_seleccionado = ""
-    
-    if proveedor_ia == "ollama":
-        if ollama_ok and ollama_modelos:
-            modelo_seleccionado = st.selectbox("Modelo Ollama", ollama_modelos)
-        else: 
-            st.error("Ollama no detectado")
+    # Configuración IA Global (usada principalmente para generación de reglas)
+    with st.expander("🤖 Configuración IA (Reglas)"):
+        ollama_ok, ollama_modelos = verificar_ollama()
+        proveedor_ia = st.selectbox("Proveedor", ["ollama", "groq", "gemini"], key="sidebar_prov")
         
-    elif proveedor_ia == "gemini":
-        api_key_ia = st.text_input("API Key Google AI", type="password")
+        api_key_ia = ""
+        modelo_seleccionado = ""
         
-        opciones_gemini = [
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-exp",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-exp-1206",
-            "gemini-2.0-flash-thinking-exp",
-            "Otro (Escribir manual)"
-        ]
-        
-        seleccion = st.selectbox("Modelo Gemini", opciones_gemini)
-        
-        if seleccion == "Otro (Escribir manual)":
-            modelo_seleccionado = st.text_input("Nombre del modelo", placeholder="ej: gemini-1.5-pro")
-        else:
-            modelo_seleccionado = seleccion
-            
-    elif proveedor_ia == "groq":
-        api_key_ia = st.text_input("API Key Groq", type="password")
-        modelo_seleccionado = st.selectbox(
-            "Modelo Groq",
-            ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
-        )
+        if proveedor_ia == "ollama":
+            if ollama_ok and ollama_modelos:
+                modelo_seleccionado = st.selectbox("Modelo Ollama", ollama_modelos, key="sidebar_ollama")
+            else: 
+                st.error("Ollama no detectado")
+        elif proveedor_ia == "gemini":
+            api_key_ia = st.text_input("API Key Google AI", type="password", key="sidebar_gemini_key")
+            opciones_gemini = ["gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-exp-1206", "gemini-2.0-flash-thinking-exp", "Otro (Escribir manual)"]
+            seleccion = st.selectbox("Modelo Gemini", opciones_gemini, key="sidebar_gemini_mod")
+            modelo_seleccionado = st.text_input("Nombre del modelo", placeholder="ej: gemini-1.5-pro") if seleccion == "Otro (Escribir manual)" else seleccion
+        elif proveedor_ia == "groq":
+            api_key_ia = st.text_input("API Key Groq", type="password", key="sidebar_groq_key")
+            modelo_seleccionado = st.selectbox("Modelo Groq", ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"], key="sidebar_groq_mod")
 
     st.markdown("---")
     
@@ -1423,7 +1423,7 @@ elif pagina == "🚗 Valuar Vehículo":
     st.markdown("---")
     
     # Configuración de IA
-    st.subheader("🤖 Proveedor de Valuación")
+    st.subheader("🤖 Configuración de IA (Búsqueda y Valuación)")
     
     col_ia1, col_ia2 = st.columns(2)
     
@@ -1496,32 +1496,56 @@ elif pagina == "🚗 Valuar Vehículo":
     
     with col_btn_val1:
         if st.button("🔍 1. Buscar Publicaciones", use_container_width=True, disabled=not (marca and modelo)):
-            with st.spinner("Buscando en la web (DuckDuckGo/Google)..."):
+            st.session_state.detener_busqueda = False
+            
+            # Banner informativo de IA activa (usando la selección de la página)
+            ia_label = {"ollama": "🦙 OLLAMA (Local)", "groq": "⚡ GROQ (Cloud)", "gemini": "🔷 GEMINI (Cloud)", "mock": "🧪 MOCK"}.get(proveedor_valuacion, proveedor_valuacion.upper())
+            st.info(f"🤖 **Navegación Inteligente Activa**\n\n**Proveedor:** {ia_label} | **Modelo:** `{modelo_valuacion or 'Default'}`")
+            
+            with st.status("Ejecutando búsqueda inteligente...", expanded=True) as status:
+                # Botón para detener (usando un placeholder para que aparezca arriba)
+                stop_placeholder = st.empty()
+                
                 payload_busqueda = {
                     "marca": marca,
                     "modelo": modelo,
                     "año": año,
-                    "version": version if version else None
+                    "version": version if version else None,
+                    # Si el usuario eligió 'mock' para el resultado, la búsqueda (que es agentica) 
+                    # usa la IA configurada en la sidebar o Ollama por defecto.
+                    "proveedor_ia": proveedor_valuacion if proveedor_valuacion != "mock" else proveedor_ia,
+                    "modelo_ia": modelo_valuacion if proveedor_valuacion != "mock" else (modelo_seleccionado or "llama3.2"),
+                    "api_key_ia": api_key_valuacion if proveedor_valuacion != "mock" else api_key_ia
                 }
-                res_busqueda = api_post("/buscar_urls", payload_busqueda)
-                if res_busqueda:
-                    st.session_state.urls_encontradas = res_busqueda.get("resultados", [])
-                    fuente_usada = res_busqueda.get("fuente", "Web")
-                    queries_usadas = res_busqueda.get("queries", [])
-                    
-                    if queries_usadas:
-                        with st.expander("🔎 Ver historial de búsquedas intentadas"):
-                            for i, q in enumerate(queries_usadas):
-                                st.write(f"{i+1}. `{q}`")
-                        # Mostrar la última (la que debería haber traído resultados)
-                        st.info(f"🔎 **Última consulta:** `{queries_usadas[-1]}`")
-                    
-                    if st.session_state.urls_encontradas:
-                        st.success(f"✅ Se hallaron {len(st.session_state.urls_encontradas)} publicaciones potenciales usando {fuente_usada}.")
-                    else:
-                        st.warning(f"⚠️ No se hallaron publicaciones potenciales usando {fuente_usada}. Verifique que las reglas de filtro no sean demasiado restrictivas.")
-                else:
-                    st.error("No se hallaron publicaciones.")
+                
+                try:
+                    with requests.post(f"{API_URL}/buscar_urls", json=payload_busqueda, stream=True) as r:
+                        for line in r.iter_lines():
+                            # Verificar si el usuario pidió detener
+                            if st.session_state.detener_busqueda:
+                                st.warning("🛑 Búsqueda detenida por el usuario.")
+                                break
+                                
+                            if line:
+                                update = json.loads(line.decode('utf-8'))
+                                step_text = update.get("step", "")
+                                status_type = update.get("status", "info")
+                                
+                                if status_type == "success": st.toast(step_text, icon="✅")
+                                elif status_type == "error": st.error(step_text)
+                                else: st.write(f"⏳ {step_text}")
+                                
+                                if "resultados" in update:
+                                    st.session_state.urls_encontradas = update["resultados"]
+                                    status.update(label="✅ Búsqueda completada", state="complete", expanded=False)
+                
+                except Exception as e:
+                    st.error(f"Error de conexión: {e}")
+
+        if st.session_state.urls_encontradas and not st.session_state.detener_busqueda:
+            if st.button("🛑 Detener Proceso", use_container_width=True):
+                st.session_state.detener_busqueda = True
+                st.rerun()
 
     # Mostrar URLs halladas si existen
     if st.session_state.urls_encontradas:

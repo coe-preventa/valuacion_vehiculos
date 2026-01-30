@@ -5,16 +5,18 @@ Crear el entorno virtual: primera vez
 py -3.13 -m venv venv
 
 Activar el entorno virtual:
-\venv\Scripts\activate
+.\venv\Scripts\activate
+sino funciona primero ejecutar:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 Instalar depedencias:
 pip install -r requirements.txt
 pip install duckduckgo-search
-
+playwright install chromium
 
 lanzar backend
 cd .\backend\api
-python -m uvicorn main:app --reload --port 8000
+python run_backend.py
 
 lanzar frontend
 streamlit run frontend/app.py
